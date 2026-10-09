@@ -59,73 +59,18 @@
       link.href = manifestURL;
       document.head.appendChild(link);
 
-      // Register Service Worker from Blob URL for background system reminders
       if ('serviceWorker' in navigator) {
         const swCode = `
-          const CACHE_NAME = 'mytodo-v3';
-          let scheduledTimers = [];
-
+          const CACHE_NAME = 'mytodo-v4';
           self.addEventListener('install', (e) => self.skipWaiting());
           self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
           self.addEventListener('fetch', (e) => {
             e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
           });
-          self.addEventListener('notificationclick', (e) => {
-            e.notification.close();
-            e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-              for (let client of clientList) {
-                if ('focus' in client) return client.focus();
-              }
-              if (clients.openWindow) return clients.openWindow('/');
-            }));
-          });
-
-          // Handle background system reminders
-          self.addEventListener('message', (e) => {
-            if (e.data && e.data.type === 'SCHEDULE_REMINDERS') {
-              scheduledTimers.forEach(t => clearTimeout(t));
-              scheduledTimers = [];
-              const reminders = e.data.reminders || [];
-              reminders.forEach(item => {
-                const delay = item.time - Date.now();
-                if (delay > 0) {
-                  if ('showTrigger' in Notification.prototype && (typeof TimestampTrigger !== 'undefined' || 'TimestampTrigger' in self)) {
-                    try {
-                      const TriggerClass = typeof TimestampTrigger !== 'undefined' ? TimestampTrigger : self.TimestampTrigger;
-                      self.registration.showNotification('MyTodo 任务提醒', {
-                        body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
-                        icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
-                        showTrigger: new TriggerClass(item.time),
-                        tag: 'reminder-' + item.id,
-                        requireInteraction: true,
-                        vibrate: [200, 100, 200, 100, 200]
-                      });
-                    } catch(err) {}
-                  }
-                  
-                  const timerId = setTimeout(() => {
-                    self.registration.showNotification('MyTodo 任务提醒', {
-                      body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
-                      icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
-                      tag: 'reminder-' + item.id,
-                      requireInteraction: true,
-                      vibrate: [200, 100, 200, 100, 200]
-                    });
-                  }, delay);
-                  scheduledTimers.push(timerId);
-                }
-              });
-            }
-          });
         `;
         const swBlob = new Blob([swCode], { type: 'application/javascript' });
         const swURL = URL.createObjectURL(swBlob);
-        navigator.serviceWorker.register(swURL).then(reg => {
-          window.swRegistration = reg;
-          navigator.serviceWorker.ready.then(() => {
-            if (typeof syncRemindersToSW === 'function') syncRemindersToSW();
-          });
-        }).catch(() => {});
+        navigator.serviceWorker.register(swURL).catch(() => {});
       }
     })();
   </script>
@@ -252,7 +197,7 @@
           <i class="fa-solid fa-chevron-left"></i>
         </button>
         <div class="text-center">
-          <h2 id="day-view-title" class="text-base font-bold text-gray-800">2026年10月8日 星期四</h2>
+          <h2 id="day-view-title" class="text-base font-bold text-gray-800">2026年10月9日 星期五</h2>
           <div id="day-view-holiday" class="text-[11px] font-semibold text-brand mt-0.5"></div>
         </div>
         <div class="flex items-center space-x-1">
@@ -307,12 +252,11 @@
         <div id="month-grid" class="grid grid-cols-7 divide-x divide-y divide-gray-100/80 bg-white"></div>
       </div>
 
-      <!-- Selected Day Agenda Panel -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-3">
         <div class="flex items-center justify-between pb-2 border-b border-gray-100">
           <div class="flex items-center space-x-2">
             <div class="w-2 h-4 bg-brand rounded-full"></div>
-            <h3 id="month-selected-date-title" class="text-sm sm:text-base font-bold text-gray-800">10月8日 星期四</h3>
+            <h3 id="month-selected-date-title" class="text-sm sm:text-base font-bold text-gray-800">10月9日 星期五</h3>
             <span id="month-selected-date-badge" class="hidden text-[10px] font-bold px-2 py-0.5 rounded-full"></span>
           </div>
           <button onclick="addQuickTaskForSelectedMonthDate()" class="text-xs bg-brand text-white font-medium px-3 py-1.5 rounded-xl hover:bg-brand-hover transition flex items-center space-x-1 active:scale-95 shadow-sm">
@@ -424,7 +368,7 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs font-bold text-gray-600 mb-1">提醒时间</label>
-              <input type="datetime-local" id="edit-task-reminder" onchange="autoRequestNotificationPermission()"
+              <input type="datetime-local" id="edit-task-reminder"
                 class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
             </div>
             <div>
@@ -435,6 +379,11 @@
                 <option value="alarm">急促闹钟</option>
               </select>
             </div>
+          </div>
+          
+          <div class="p-2.5 bg-blue-50/80 rounded-xl border border-blue-100 flex items-center justify-between text-[11px] text-blue-700">
+            <span class="flex items-center"><i class="fa-solid fa-mobile-screen-button mr-1.5 text-brand"></i>支持 HarmonyOS / 手机系统日历强提醒</span>
+            <button type="button" onclick="exportCurrentModalTaskToICS()" class="font-bold underline hover:text-brand">写入系统日历</button>
           </div>
         </div>
 
@@ -508,7 +457,6 @@
 
       setInterval(checkReminders, 15000);
       checkReminders();
-      syncRemindersToSW();
     });
 
     function getDemoTasks() {
@@ -531,7 +479,7 @@
         },
         {
           id: 'demo-2',
-          title: '切换顶部选项卡体验“日、周、月”日历视图',
+          title: '点击右上角“日、周视图、月视图”切换日历看板',
           dueDate: todayStr,
           dueTime: '20:00',
           priority: 0,
@@ -542,13 +490,13 @@
         },
         {
           id: 'demo-3',
-          title: '点击底部加号按钮新建定时与周期提醒任务',
+          title: '设置时间后可同步至 HarmonyOS 手机系统日历接管强提醒',
           dueDate: tomorrowStr,
           dueTime: '09:00',
-          priority: 0,
+          priority: 3,
           completed: false,
           repeat: 'daily',
-          reminder: '',
+          reminder: tomorrowStr + 'T09:00',
           ringtone: 'bell'
         }
       ];
@@ -565,7 +513,6 @@
 
     function saveTasks() {
       localStorage.setItem('mytodo_tasks', JSON.stringify(tasks));
-      syncRemindersToSW();
       renderCurrentView();
     }
 
@@ -583,6 +530,13 @@
           if (panel) panel.classList.add('hidden');
         }
       });
+
+      const fabBtn = document.getElementById('floating-add-btn');
+      if (fabBtn) {
+        if (viewName === 'month') fabBtn.classList.add('hidden');
+        else fabBtn.classList.remove('hidden');
+      }
+
       renderCurrentView();
     }
 
@@ -922,9 +876,12 @@
               </div>
             </div>
           </div>
-          <button onclick="deleteTask('${t.id}', event)" class="p-1.5 text-gray-300 hover:text-red-500 rounded-lg transition shrink-0">
-            <i class="fa-regular fa-trash-can text-xs"></i>
-          </button>
+          <div class="flex items-center space-x-1 shrink-0">
+            ${t.dueDate ? `<button onclick="syncTaskToSystemCalendar('${t.id}', event)" class="p-1.5 text-brand hover:bg-indigo-50 rounded-lg transition" title="写入系统日历"><i class="fa-regular fa-calendar-plus text-xs"></i></button>` : ''}
+            <button onclick="deleteTask('${t.id}', event)" class="p-1.5 text-gray-300 hover:text-red-500 rounded-lg transition">
+              <i class="fa-regular fa-trash-can text-xs"></i>
+            </button>
+          </div>
         </div>
       `;
     }
@@ -1080,23 +1037,25 @@
 
       if (!title) return;
 
+      let taskObj = null;
+
       if (id) {
-        const task = tasks.find(t => t.id === id);
-        if (task) {
-          task.title = title;
-          task.dueDate = dueDate;
-          task.dueTime = dueTime;
-          task.priority = isHighPrio ? 3 : 0;
-          task.repeat = repeat;
-          task.repeatInterval = interval;
-          task.repeatEndType = endType;
-          task.repeatCount = count;
-          task.reminder = reminder;
-          task.ringtone = ringtone;
-          task.reminded = false;
+        taskObj = tasks.find(t => t.id === id);
+        if (taskObj) {
+          taskObj.title = title;
+          taskObj.dueDate = dueDate;
+          taskObj.dueTime = dueTime;
+          taskObj.priority = isHighPrio ? 3 : 0;
+          taskObj.repeat = repeat;
+          taskObj.repeatInterval = interval;
+          taskObj.repeatEndType = endType;
+          taskObj.repeatCount = count;
+          taskObj.reminder = reminder;
+          taskObj.ringtone = ringtone;
+          taskObj.reminded = false;
         }
       } else {
-        tasks.push({
+        taskObj = {
           id: 'task-' + Date.now(),
           title: title,
           dueDate: dueDate,
@@ -1110,10 +1069,14 @@
           reminder: reminder,
           reminded: false,
           ringtone: ringtone
-        });
+        };
+        tasks.push(taskObj);
       }
 
       saveTasks();
+      if (taskObj && (taskObj.reminder || taskObj.dueDate)) {
+        syncTaskToHarmonyOSCalendarBridge(taskObj);
+      }
       closeModal();
     }
 
@@ -1124,6 +1087,107 @@
         saveTasks();
         closeModal();
       }
+    }
+
+    // HarmonyOS ASCF / ArkWeb System Calendar Bridge Integration
+    function syncTaskToHarmonyOSCalendarBridge(task) {
+      if (!task.dueDate) return;
+      
+      const startTimeStr = task.reminder ? task.reminder.replace('T', ' ') : `${task.dueDate} ${task.dueTime || '09:00'}:00`;
+      
+      if (window.HarmonyCalendar && typeof window.HarmonyCalendar.addCalendarEvent === 'function') {
+        try {
+          window.HarmonyCalendar.addCalendarEvent(JSON.stringify({
+            id: task.id,
+            title: task.title,
+            startTime: startTimeStr,
+            description: `MyTodo 提醒：${task.title}`,
+            reminderMinutesBefore: 0
+          }));
+          return;
+        } catch(e) {}
+      }
+
+      if (window.ASCFBridge && typeof window.ASCFBridge.postMessage === 'function') {
+        try {
+          window.ASCFBridge.postMessage(JSON.stringify({
+            action: 'ADD_CALENDAR_REMINDER',
+            data: { id: task.id, title: task.title, startTime: startTimeStr }
+          }));
+        } catch(e) {}
+      }
+    }
+
+    function syncTaskToSystemCalendar(taskId, event) {
+      if (event) event.stopPropagation();
+      const task = typeof taskId === 'object' ? taskId : tasks.find(t => t.id === taskId);
+      if (!task || !task.dueDate) {
+        alert('请先设置截止日期或提醒时间。');
+        return;
+      }
+
+      syncTaskToHarmonyOSCalendarBridge(task);
+      exportICSFile(task);
+    }
+
+    function exportCurrentModalTaskToICS() {
+      const title = document.getElementById('edit-task-title').value.trim();
+      const dueDate = document.getElementById('edit-task-duedate').value;
+      const dueTime = document.getElementById('edit-task-duetime').value || '09:00';
+      const reminder = document.getElementById('edit-task-reminder').value;
+
+      if (!dueDate) {
+        alert('请先选择截止日期。');
+        return;
+      }
+
+      const tempTask = {
+        title: title || 'MyTodo 待办任务',
+        dueDate: dueDate,
+        dueTime: dueTime,
+        reminder: reminder
+      };
+
+      syncTaskToHarmonyOSCalendarBridge(tempTask);
+      exportICSFile(tempTask);
+    }
+
+    function exportICSFile(task) {
+      const startDateTime = task.reminder ? new Date(task.reminder) : new Date(`${task.dueDate}T${task.dueTime || '09:00'}:00`);
+      if (isNaN(startDateTime.getTime())) return;
+
+      const endDateTime = new Date(startDateTime.getTime() + 30 * 60 * 1000); // 30 minutes
+
+      const formatICSDate = (d) => {
+        return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      };
+
+      const icsContent = 
+`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//MyTodo Calendar//CN
+BEGIN:VEVENT
+UID:${task.id || Date.now()}@mytodo.app
+SUMMARY:${task.title}
+DESCRIPTION:MyTodo 个人任务强提醒
+DTSTART:${formatICSDate(startDateTime)}
+DTEND:${formatICSDate(endDateTime)}
+BEGIN:VALARM
+TRIGGER:-PT0M
+ACTION:DISPLAY
+DESCRIPTION:提醒：${task.title}
+END:VALARM
+END:VEVENT
+END:VCALENDAR`;
+
+      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${task.title.substring(0, 10)}.ics`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
     function initSpeechRecognition() {
@@ -1178,50 +1242,6 @@
       }
     }
 
-    function autoRequestNotificationPermission() {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().then(perm => {
-          if (perm === 'granted') {
-            syncRemindersToSW();
-          }
-        });
-      }
-    }
-
-    function syncRemindersToSW() {
-      if (!('serviceWorker' in navigator)) return;
-      const now = Date.now();
-      const pending = tasks
-        .filter(t => !t.completed && t.reminder && !t.reminded)
-        .map(t => ({
-          id: t.id,
-          title: t.title,
-          dueDate: t.dueDate,
-          reminder: t.reminder,
-          time: new Date(t.reminder).getTime()
-        }))
-        .filter(t => !isNaN(t.time) && t.time > now);
-
-      const sendMsg = (targetWorker) => {
-        if (targetWorker) {
-          targetWorker.postMessage({
-            type: 'SCHEDULE_REMINDERS',
-            reminders: pending
-          });
-        }
-      };
-
-      if (navigator.serviceWorker.controller) {
-        sendMsg(navigator.serviceWorker.controller);
-      }
-
-      navigator.serviceWorker.ready.then(reg => {
-        if (reg.active) {
-          sendMsg(reg.active);
-        }
-      }).catch(() => {});
-    }
-
     function checkReminders() {
       const now = new Date();
       let hasChanges = false;
@@ -1243,21 +1263,6 @@
     function triggerAlarm(task) {
       startLoopingSound(task.ringtone || 'chime');
       showAlarmModal(task);
-
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const title = 'MyTodo 任务提醒';
-        const options = {
-          body: task.title + (task.dueDate ? ` (${task.dueDate})` : ''),
-          icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="%234772FA"><rect width="512" height="512" rx="100"/><path d="M381 181L214 348L131 265" stroke="white" stroke-width="48" stroke-linecap="round" fill="none"/></svg>',
-          requireInteraction: true
-        };
-
-        if (window.swRegistration && window.swRegistration.showNotification) {
-          window.swRegistration.showNotification(title, options);
-        } else {
-          new Notification(title, options);
-        }
-      }
     }
 
     function showAlarmModal(task) {
