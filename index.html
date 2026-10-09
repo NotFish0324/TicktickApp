@@ -63,6 +63,8 @@
       if ('serviceWorker' in navigator) {
         const swCode = `
           const CACHE_NAME = 'mytodo-v2';
+          let scheduledTimers = [];
+
           self.addEventListener('install', (e) => self.skipWaiting());
           self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
           self.addEventListener('fetch', (e) => {
@@ -74,6 +76,42 @@
               if (clientList.length > 0) return clientList[0].focus();
               return clients.openWindow && clients.openWindow('/');
             }));
+          });
+
+          // Handle background system reminders even when webpage is closed
+          self.addEventListener('message', (e) => {
+            if (e.data && e.data.type === 'SCHEDULE_REMINDERS') {
+              scheduledTimers.forEach(t => clearTimeout(t));
+              scheduledTimers = [];
+              const reminders = e.data.reminders || [];
+              reminders.forEach(item => {
+                const delay = item.time - Date.now();
+                if (delay > 0) {
+                  // Attempt Notification Trigger API if supported
+                  if ('showTrigger' in Notification.prototype && typeof TimestampTrigger !== 'undefined') {
+                    try {
+                      self.registration.showNotification('MyTodo 任务提醒', {
+                        body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
+                        icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
+                        showTrigger: new TimestampTrigger(item.time),
+                        requireInteraction: true
+                      });
+                    } catch(err) {}
+                  }
+                  
+                  // Fallback timer inside Service Worker process
+                  const timerId = setTimeout(() => {
+                    self.registration.showNotification('MyTodo 任务提醒', {
+                      body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
+                      icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
+                      requireInteraction: true,
+                      vibrate: [200, 100, 200, 100, 200]
+                    });
+                  }, delay);
+                  scheduledTimers.push(timerId);
+                }
+              });
+            }
           });
         `;
         const swBlob = new Blob([swCode], { type: 'application/javascript' });
@@ -394,7 +432,7 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs font-bold text-gray-600 mb-1">提醒时间</label>
-              <input type="datetime-local" id="edit-task-reminder" 
+              <input type="datetime-local" id="edit-task-reminder" onchange="autoRequestNotificationPermission()"
                 class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
             </div>
             <div>
@@ -407,8 +445,8 @@
             </div>
           </div>
           <div class="flex items-center justify-between text-[10px] text-gray-500 pt-1">
-            <span>支持系统级通知与强提醒弹窗</span>
-            <button type="button" onclick="requestNotificationPermission()" class="text-brand font-bold underline">开启通知权限</button>
+            <span>支持页面关闭后的系统级后台强提醒</span>
+            <span class="text-brand font-bold">设置时间即自动生效</span>
           </div>
         </div>
 
@@ -483,6 +521,49 @@
       checkReminders();
     });
 
+    function getDemoTasks() {
+      const todayStr = getISODateString(new Date());
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = getISODateString(tomorrow);
+
+      return [
+        {
+          id: 'demo-1',
+          title: '欢迎使用 MyTodo 个人任务与日历',
+          dueDate: todayStr,
+          dueTime: '18:00',
+          priority: 3,
+          completed: false,
+          repeat: 'none',
+          reminder: '',
+          ringtone: 'chime'
+        },
+        {
+          id: 'demo-2',
+          title: '切换顶部选项卡体验“日、周、月”日历视图',
+          dueDate: todayStr,
+          dueTime: '20:00',
+          priority: 0,
+          completed: false,
+          repeat: 'none',
+          reminder: '',
+          ringtone: 'chime'
+        },
+        {
+          id: 'demo-3',
+          title: '点击底部加号按钮新建定时与周期提醒任务',
+          dueDate: tomorrowStr,
+          dueTime: '09:00',
+          priority: 0,
+          completed: false,
+          repeat: 'daily',
+          reminder: '',
+          ringtone: 'bell'
+        }
+      ];
+    }
+
     function loadTasks() {
       try {
         const saved = localStorage.getItem('mytodo_tasks');
@@ -492,69 +573,20 @@
       }
     }
 
-    function saveTasks() {
-      localStorage.setItem('mytodo_tasks', JSON.stringify(tasks));
-      renderCurrentView();
-    }
-
-    function getDemoTasks() {
-      const today = getISODateString(new Date());
-      return [
-        {
-          id: 'demo-1',
-          title: '欢迎使用 MyTodo！点击这里查看或编辑任务',
-          dueDate: today,
-          dueTime: '09:00',
-          priority: 3,
-          completed: false,
-          repeat: 'none',
-          reminder: '',
-          ringtone: 'chime',
-          reminded: false
-        },
-        {
-          id: 'demo-2',
-          title: '每周团队例会',
-          dueDate: today,
-          dueTime: '14:30',
-          priority: 0,
-          completed: false,
-          repeat: 'weekly',
-          repeatEndType: 'infinite',
-          repeatCount: 0,
-          reminder: '',
-          ringtone: 'bell',
-          reminded: false
-        }
-      ];
-    }
-
     function switchView(viewName) {
       currentView = viewName;
-      document.querySelectorAll('.view-tab').forEach(btn => {
-        btn.classList.remove('bg-white', 'text-brand', 'shadow-sm');
-        btn.classList.add('text-gray-600');
-      });
-      const activeBtn = document.getElementById(`tab-${viewName}`);
-      if (activeBtn) {
-        activeBtn.classList.add('bg-white', 'text-brand', 'shadow-sm');
-        activeBtn.classList.remove('text-gray-600');
-      }
-
-      document.querySelectorAll('.view-panel').forEach(panel => panel.classList.add('hidden'));
-      const activePanel = document.getElementById(`view-${viewName}`);
-      if (activePanel) activePanel.classList.remove('hidden');
-
-      // Toggle Floating Add Button Visibility
-      const fab = document.getElementById('floating-add-btn');
-      if (fab) {
-        if (viewName === 'month') {
-          fab.classList.add('hidden');
+      const tabs = ['list', 'day', 'week', 'month'];
+      tabs.forEach(v => {
+        const tabBtn = document.getElementById(`tab-${v}`);
+        const panel = document.getElementById(`view-${v}`);
+        if (v === viewName) {
+          if (tabBtn) tabBtn.className = 'view-tab px-3 py-1.5 rounded-lg transition-all bg-white text-brand font-bold shadow-sm';
+          if (panel) panel.classList.remove('hidden');
         } else {
-          fab.classList.remove('hidden');
+          if (tabBtn) tabBtn.className = 'view-tab px-3 py-1.5 rounded-lg transition-all text-gray-600 hover:text-gray-900';
+          if (panel) panel.classList.add('hidden');
         }
-      }
-
+      });
       renderCurrentView();
     }
 
@@ -565,56 +597,110 @@
       else if (currentView === 'month') renderMonthView();
     }
 
+    function clearSearch() {
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) searchInput.value = '';
+      renderListView();
+    }
+
     function renderListView() {
-      const searchVal = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
+      const searchInput = document.getElementById('search-input');
+      const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
       const clearBtn = document.getElementById('search-clear-btn');
       if (clearBtn) {
-        if (searchVal) clearBtn.classList.remove('hidden');
+        if (query) clearBtn.classList.remove('hidden');
         else clearBtn.classList.add('hidden');
       }
 
       const todayStr = getISODateString(new Date());
 
+      const filteredTasks = tasks.filter(t => {
+        if (!query) return true;
+        return t.title.toLowerCase().includes(query);
+      });
+
       const todayContainer = document.getElementById('list-today-container');
       const upcomingContainer = document.getElementById('list-upcoming-container');
       const nodateContainer = document.getElementById('list-nodate-container');
       const completedContainer = document.getElementById('list-completed-container');
+      const countBadge = document.getElementById('completed-count-badge');
 
-      let activeTasks = tasks.filter(t => !t.completed);
-      let completedTasks = tasks.filter(t => t.completed);
+      const todayTasks = filteredTasks.filter(t => !t.completed && t.dueDate && t.dueDate <= todayStr);
+      const upcomingTasks = filteredTasks.filter(t => !t.completed && t.dueDate && t.dueDate > todayStr);
+      const nodateTasks = filteredTasks.filter(t => !t.completed && !t.dueDate);
+      const completedTasks = filteredTasks.filter(t => t.completed);
 
-      if (searchVal) {
-        activeTasks = activeTasks.filter(t => t.title.toLowerCase().includes(searchVal));
-        completedTasks = completedTasks.filter(t => t.title.toLowerCase().includes(searchVal));
+      todayTasks.sort((a, b) => b.priority - a.priority);
+      upcomingTasks.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+
+      if (todayContainer) {
+        todayContainer.innerHTML = todayTasks.length > 0 
+          ? todayTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('暂无今天或过期的待办任务');
       }
 
-      const todayOverdueTasks = activeTasks.filter(t => t.dueDate && t.dueDate <= todayStr);
-      const upcomingTasks = activeTasks.filter(t => t.dueDate && t.dueDate > todayStr);
-      const noDateTasks = activeTasks.filter(t => !t.dueDate);
+      if (upcomingContainer) {
+        upcomingContainer.innerHTML = upcomingTasks.length > 0 
+          ? upcomingTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('暂无即将到来的任务');
+      }
 
-      const sortFn = (a, b) => {
-        if (b.priority !== a.priority) return b.priority - a.priority;
-        return (a.dueTime || '23:59').localeCompare(b.dueTime || '23:59');
-      };
+      if (nodateContainer) {
+        nodateContainer.innerHTML = nodateTasks.length > 0 
+          ? nodateTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('无截止日期的任务');
+      }
 
-      todayOverdueTasks.sort(sortFn);
-      upcomingTasks.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '') || sortFn(a, b));
-      noDateTasks.sort(sortFn);
-      completedTasks.sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || ''));
+      if (completedContainer) {
+        completedContainer.innerHTML = completedTasks.length > 0 
+          ? completedTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('暂无已完成的任务');
+      }
 
-      todayContainer.innerHTML = todayOverdueTasks.length ? todayOverdueTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('暂无今日或过期待办');
-      upcomingContainer.innerHTML = upcomingTasks.length ? upcomingTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('近期暂无安排');
-      nodateContainer.innerHTML = noDateTasks.length ? noDateTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('暂无未定日期的任务');
-      completedContainer.innerHTML = completedTasks.length ? completedTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('尚无完成记录');
-
-      document.getElementById('completed-count-badge').textContent = completedTasks.length;
+      if (countBadge) {
+        countBadge.textContent = completedTasks.length;
+      }
     }
 
-    function clearSearch() {
-      const input = document.getElementById('search-input');
-      if (input) {
-        input.value = '';
-        renderListView();
+    function saveTasks() {
+      localStorage.setItem('mytodo_tasks', JSON.stringify(tasks));
+      syncRemindersToSW();
+      renderCurrentView();
+    }
+
+    function syncRemindersToSW() {
+      if (!('serviceWorker' in navigator)) return;
+      const now = Date.now();
+      const pending = tasks
+        .filter(t => !t.completed && t.reminder && !t.reminded)
+        .map(t => ({
+          id: t.id,
+          title: t.title,
+          dueDate: t.dueDate,
+          reminder: t.reminder,
+          time: new Date(t.reminder).getTime()
+        }))
+        .filter(t => !isNaN(t.time) && t.time > now);
+
+      const sendMsg = () => {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SCHEDULE_REMINDERS',
+            reminders: pending
+          });
+        }
+      };
+
+      if (navigator.serviceWorker.controller) {
+        sendMsg();
+      } else {
+        navigator.serviceWorker.ready.then(sendMsg).catch(() => {});
+      }
+    }
+
+    function autoRequestNotificationPermission() {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
       }
     }
 
@@ -1087,6 +1173,14 @@
       else countBox.classList.add('hidden');
     }
 
+    function deleteCurrentModalTask() {
+      const id = document.getElementById('edit-task-id').value;
+      if (!id) return;
+      tasks = tasks.filter(t => t.id !== id);
+      saveTasks();
+      closeModal();
+    }
+
     function saveTask() {
       const id = document.getElementById('edit-task-id').value;
       const title = document.getElementById('edit-task-title').value.trim();
@@ -1102,44 +1196,36 @@
       const reminder = document.getElementById('edit-task-reminder').value;
       const ringtone = document.getElementById('edit-task-ringtone').value || 'chime';
 
+      if (reminder) {
+        autoRequestNotificationPermission();
+      }
+
+      const existingTask = id ? tasks.find(t => t.id === id) : null;
+      const taskData = {
+        id: id || ('task-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4)),
+        title,
+        dueDate,
+        dueTime,
+        priority,
+        repeat,
+        repeatInterval,
+        repeatEndType,
+        repeatCount,
+        reminder,
+        ringtone,
+        completed: existingTask ? existingTask.completed : false,
+        reminded: existingTask && existingTask.reminder === reminder ? existingTask.reminded : false
+      };
+
       if (id) {
-        const task = tasks.find(t => t.id === id);
-        if (task) {
-          task.title = title;
-          task.dueDate = dueDate;
-          task.dueTime = dueTime;
-          task.priority = priority;
-          task.repeat = repeat;
-          task.repeatInterval = repeatInterval;
-          task.repeatEndType = repeatEndType;
-          task.repeatCount = repeatCount;
-          task.ringtone = ringtone;
-          if (task.reminder !== reminder) {
-            task.reminder = reminder;
-            task.reminded = false;
-          }
-        }
+        const idx = tasks.findIndex(t => t.id === id);
+        if (idx !== -1) tasks[idx] = taskData;
       } else {
-        tasks.unshift({
-          id: 'task-' + Date.now(),
-          title, dueDate, dueTime, priority,
-          completed: false, repeat, repeatInterval,
-          repeatEndType, repeatCount, reminder, ringtone,
-          reminded: false
-        });
+        tasks.unshift(taskData);
       }
 
       saveTasks();
       closeModal();
-    }
-
-    function deleteCurrentModalTask() {
-      const id = document.getElementById('edit-task-id').value;
-      if (id) {
-        tasks = tasks.filter(t => t.id !== id);
-        saveTasks();
-        closeModal();
-      }
     }
 
     function requestNotificationPermission() {
