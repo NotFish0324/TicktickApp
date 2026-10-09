@@ -59,10 +59,10 @@
       link.href = manifestURL;
       document.head.appendChild(link);
 
-      // Register Service Worker from Blob URL for system level notifications & offline support
+      // Register Service Worker from Blob URL for background system reminders
       if ('serviceWorker' in navigator) {
         const swCode = `
-          const CACHE_NAME = 'mytodo-v2';
+          const CACHE_NAME = 'mytodo-v3';
           let scheduledTimers = [];
 
           self.addEventListener('install', (e) => self.skipWaiting());
@@ -72,13 +72,15 @@
           });
           self.addEventListener('notificationclick', (e) => {
             e.notification.close();
-            e.waitUntil(clients.matchAll({ type: 'window' }).then((clientList) => {
-              if (clientList.length > 0) return clientList[0].focus();
-              return clients.openWindow && clients.openWindow('/');
+            e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+              for (let client of clientList) {
+                if ('focus' in client) return client.focus();
+              }
+              if (clients.openWindow) return clients.openWindow('/');
             }));
           });
 
-          // Handle background system reminders even when webpage is closed
+          // Handle background system reminders
           self.addEventListener('message', (e) => {
             if (e.data && e.data.type === 'SCHEDULE_REMINDERS') {
               scheduledTimers.forEach(t => clearTimeout(t));
@@ -87,23 +89,25 @@
               reminders.forEach(item => {
                 const delay = item.time - Date.now();
                 if (delay > 0) {
-                  // Attempt Notification Trigger API if supported
-                  if ('showTrigger' in Notification.prototype && typeof TimestampTrigger !== 'undefined') {
+                  if ('showTrigger' in Notification.prototype && (typeof TimestampTrigger !== 'undefined' || 'TimestampTrigger' in self)) {
                     try {
+                      const TriggerClass = typeof TimestampTrigger !== 'undefined' ? TimestampTrigger : self.TimestampTrigger;
                       self.registration.showNotification('MyTodo 任务提醒', {
                         body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
                         icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
-                        showTrigger: new TimestampTrigger(item.time),
-                        requireInteraction: true
+                        showTrigger: new TriggerClass(item.time),
+                        tag: 'reminder-' + item.id,
+                        requireInteraction: true,
+                        vibrate: [200, 100, 200, 100, 200]
                       });
                     } catch(err) {}
                   }
                   
-                  // Fallback timer inside Service Worker process
                   const timerId = setTimeout(() => {
                     self.registration.showNotification('MyTodo 任务提醒', {
                       body: item.title + (item.dueDate ? ' (' + item.dueDate + ')' : ''),
                       icon: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%234772FA'><rect width='512' height='512' rx='100'/><path d='M381 181L214 348L131 265' stroke='white' stroke-width='48' stroke-linecap='round' fill='none'/></svg>",
+                      tag: 'reminder-' + item.id,
                       requireInteraction: true,
                       vibrate: [200, 100, 200, 100, 200]
                     });
@@ -118,6 +122,9 @@
         const swURL = URL.createObjectURL(swBlob);
         navigator.serviceWorker.register(swURL).then(reg => {
           window.swRegistration = reg;
+          navigator.serviceWorker.ready.then(() => {
+            if (typeof syncRemindersToSW === 'function') syncRemindersToSW();
+          });
         }).catch(() => {});
       }
     })();
@@ -131,7 +138,6 @@
       user-select: none;
     }
 
-    /* Custom Scrollbars */
     ::-webkit-scrollbar {
       width: 4px;
       height: 4px;
@@ -152,7 +158,6 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Alarm Ringing Animation */
     @keyframes ring-pulse {
       0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(71, 114, 250, 0.6); }
       50% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(71, 114, 250, 0); }
@@ -168,7 +173,6 @@
   <header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm px-3 py-3 sm:px-6">
     <div class="max-w-4xl mx-auto flex items-center justify-between gap-2">
       
-      <!-- App Brand Logo -->
       <div class="flex items-center space-x-2 shrink-0">
         <div class="w-8 h-8 rounded-xl bg-brand text-white flex items-center justify-center font-bold shadow-md">
           <i class="fa-solid fa-check text-sm"></i>
@@ -176,7 +180,6 @@
         <h1 class="text-lg font-bold text-gray-900 tracking-tight">MyTodo</h1>
       </div>
 
-      <!-- View Switcher Tabs with Clear Text Labels -->
       <div class="flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold text-gray-600">
         <button onclick="switchView('list')" id="tab-list" class="view-tab px-3 py-1.5 rounded-lg transition-all">
           总览
@@ -199,8 +202,6 @@
 
     <!-- VIEW 1: OVERVIEW / LIST VIEW -->
     <section id="view-list" class="view-panel space-y-4 fade-in">
-      
-      <!-- Search Input Bar at the top of Overview Tab -->
       <div class="relative flex items-center">
         <input type="text" id="search-input" oninput="renderListView()" placeholder="搜索任务标题..." 
           class="w-full pl-9 pr-8 py-2.5 text-xs sm:text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all shadow-sm">
@@ -210,7 +211,6 @@
         </button>
       </div>
 
-      <!-- Overdue & Today Section -->
       <div class="space-y-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
           <i class="fa-solid fa-fire text-amber-500"></i>
@@ -219,7 +219,6 @@
         <div id="list-today-container" class="space-y-2"></div>
       </div>
 
-      <!-- Upcoming Tasks Section -->
       <div class="space-y-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
           <i class="fa-regular fa-calendar text-brand"></i>
@@ -228,7 +227,6 @@
         <div id="list-upcoming-container" class="space-y-2"></div>
       </div>
 
-      <!-- No Due Date Section -->
       <div class="space-y-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
           <i class="fa-solid fa-inbox text-gray-400"></i>
@@ -237,7 +235,6 @@
         <div id="list-nodate-container" class="space-y-2"></div>
       </div>
 
-      <!-- Completed Tasks Section -->
       <div class="space-y-2 pt-2">
         <button onclick="toggleCompletedList()" class="flex items-center space-x-2 text-xs font-bold text-gray-400 hover:text-gray-600 transition">
           <i id="completed-chevron" class="fa-solid fa-chevron-right text-[10px] transition-transform"></i>
@@ -246,7 +243,6 @@
         </button>
         <div id="list-completed-container" class="space-y-2 hidden"></div>
       </div>
-
     </section>
 
     <!-- VIEW 2: DAY VIEW -->
@@ -336,6 +332,7 @@
     <i class="fa-solid fa-plus"></i>
   </button>
 
+  <!-- Edit & Add Task Modal -->
   <div id="task-modal" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center hidden fade-in">
     <div class="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
       
@@ -349,7 +346,6 @@
       <form id="task-form" onsubmit="event.preventDefault(); saveTask();" class="space-y-3.5">
         <input type="hidden" id="edit-task-id">
 
-        <!-- Title Input with Voice Button Integration -->
         <div>
           <label class="block text-xs font-bold text-gray-600 mb-1">任务名称</label>
           <div class="relative flex items-center gap-2">
@@ -362,7 +358,6 @@
           </div>
         </div>
 
-        <!-- Optional Due Date & Time -->
         <div class="grid grid-cols-2 gap-2">
           <div>
             <div class="flex items-center justify-between mb-1">
@@ -379,7 +374,6 @@
           </div>
         </div>
 
-        <!-- Priority Checkbox -->
         <div class="flex items-center space-x-2 pt-1">
           <input type="checkbox" id="edit-task-priority" class="w-4 h-4 text-brand rounded focus:ring-brand accent-[#4772FA]">
           <label for="edit-task-priority" class="text-xs font-bold text-gray-700 cursor-pointer select-none flex items-center space-x-1">
@@ -388,7 +382,6 @@
           </label>
         </div>
 
-        <!-- Repeat Rule -->
         <div class="space-y-2 pt-1 border-t border-gray-100">
           <div class="grid grid-cols-2 gap-2">
             <div>
@@ -427,7 +420,6 @@
           </div>
         </div>
 
-        <!-- Reminder Setting & Ringtone Selection -->
         <div class="space-y-2 pt-1 border-t border-gray-100">
           <div class="grid grid-cols-2 gap-2">
             <div>
@@ -443,10 +435,6 @@
                 <option value="alarm">急促闹钟</option>
               </select>
             </div>
-          </div>
-          <div class="flex items-center justify-between text-[10px] text-gray-500 pt-1">
-            <span>支持页面关闭后的系统级后台强提醒</span>
-            <span class="text-brand font-bold">设置时间即自动生效</span>
           </div>
         </div>
 
@@ -465,6 +453,7 @@
     </div>
   </div>
 
+  <!-- Alarm Popup Modal -->
   <div id="alarm-popup-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center hidden fade-in p-4">
     <div class="bg-white w-full max-w-sm rounded-3xl p-6 text-center space-y-4 shadow-2xl border-2 border-brand/30 alarm-ring">
       <div class="w-16 h-16 bg-brand/10 text-brand rounded-full flex items-center justify-center mx-auto text-2xl">
@@ -519,6 +508,7 @@
 
       setInterval(checkReminders, 15000);
       checkReminders();
+      syncRemindersToSW();
     });
 
     function getDemoTasks() {
@@ -573,6 +563,12 @@
       }
     }
 
+    function saveTasks() {
+      localStorage.setItem('mytodo_tasks', JSON.stringify(tasks));
+      syncRemindersToSW();
+      renderCurrentView();
+    }
+
     function switchView(viewName) {
       currentView = viewName;
       const tabs = ['list', 'day', 'week', 'month'];
@@ -601,6 +597,14 @@
       const searchInput = document.getElementById('search-input');
       if (searchInput) searchInput.value = '';
       renderListView();
+    }
+
+    function toggleCompletedList() {
+      isCompletedListOpen = !isCompletedListOpen;
+      const container = document.getElementById('list-completed-container');
+      const chevron = document.getElementById('completed-chevron');
+      if (container) container.classList.toggle('hidden', !isCompletedListOpen);
+      if (chevron) chevron.style.transform = isCompletedListOpen ? 'rotate(90deg)' : 'rotate(0deg)';
     }
 
     function renderListView() {
@@ -662,324 +666,176 @@
       }
     }
 
-    function saveTasks() {
-      localStorage.setItem('mytodo_tasks', JSON.stringify(tasks));
-      syncRemindersToSW();
-      renderCurrentView();
-    }
-
-    function syncRemindersToSW() {
-      if (!('serviceWorker' in navigator)) return;
-      const now = Date.now();
-      const pending = tasks
-        .filter(t => !t.completed && t.reminder && !t.reminded)
-        .map(t => ({
-          id: t.id,
-          title: t.title,
-          dueDate: t.dueDate,
-          reminder: t.reminder,
-          time: new Date(t.reminder).getTime()
-        }))
-        .filter(t => !isNaN(t.time) && t.time > now);
-
-      const sendMsg = () => {
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'SCHEDULE_REMINDERS',
-            reminders: pending
-          });
-        }
-      };
-
-      if (navigator.serviceWorker.controller) {
-        sendMsg();
-      } else {
-        navigator.serviceWorker.ready.then(sendMsg).catch(() => {});
-      }
-    }
-
-    function autoRequestNotificationPermission() {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-    }
-
-    function toggleCompletedList() {
-      isCompletedListOpen = !isCompletedListOpen;
-      const container = document.getElementById('list-completed-container');
-      const chevron = document.getElementById('completed-chevron');
-      if (isCompletedListOpen) {
-        container.classList.remove('hidden');
-        chevron.classList.add('rotate-90');
-      } else {
-        container.classList.add('hidden');
-        chevron.classList.remove('rotate-90');
-      }
-    }
-
-    function getEmptyStateHTML(text) {
-      return `<div class="p-3 text-center text-xs text-gray-400 bg-white/60 rounded-xl border border-dashed border-gray-200">${text}</div>`;
-    }
-
-    function renderTaskCardHTML(t) {
-      const isHighPriority = t.priority === 3;
-      const borderClass = isHighPriority ? 'border-l-4 border-l-red-500' : 'border-l-2 border-l-transparent';
-      const titleStyle = t.completed ? 'line-through text-gray-400' : 'text-gray-800 font-medium';
-
-      let dateBadge = '';
-      if (t.dueDate) {
-        const todayStr = getISODateString(new Date());
-        const isOverdue = !t.completed && t.dueDate < todayStr;
-        const color = isOverdue ? 'text-red-500 bg-red-50' : 'text-gray-500 bg-gray-100';
-        dateBadge = `<span class="text-[10px] px-2 py-0.5 rounded-md ${color} font-medium">
-          <i class="fa-regular fa-calendar mr-1"></i>${t.dueDate} ${t.dueTime || ''}
-        </span>`;
-      } else {
-        dateBadge = `<span class="text-[10px] px-2 py-0.5 rounded-md text-gray-400 bg-gray-100">无截止日期</span>`;
-      }
-
-      let repeatBadge = '';
-      if (t.repeat && t.repeat !== 'none') {
-        const label = getRepeatLabel(t);
-        repeatBadge = `<span class="text-[10px] px-2 py-0.5 rounded-md text-indigo-600 bg-indigo-50 font-medium">
-          <i class="fa-solid fa-arrows-rotate mr-1"></i>${label}
-        </span>`;
-      }
-
-      let reminderBadge = '';
-      if (t.reminder) {
-        reminderBadge = `<span class="text-[10px] px-2 py-0.5 rounded-md text-amber-600 bg-amber-50 font-medium" title="提醒：${t.reminder}">
-          <i class="fa-regular fa-bell mr-1"></i>提醒
-        </span>`;
-      }
-
-      return `
-        <div onclick="openModal('${t.id}')" class="group bg-white p-3 rounded-xl shadow-sm border border-gray-100/90 hover:shadow-md transition cursor-pointer flex items-center justify-between gap-3 ${borderClass}">
-          <div class="flex items-center space-x-3 min-w-0">
-            <button onclick="toggleTask('${t.id}', event)" class="shrink-0 text-lg transition active:scale-90">
-              ${t.completed 
-                ? '<i class="fa-solid fa-circle-check text-brand"></i>' 
-                : '<i class="fa-regular fa-circle text-gray-300 group-hover:text-brand"></i>'}
-            </button>
-            <div class="min-w-0">
-              <p class="text-xs sm:text-sm ${titleStyle} truncate">${escapeHTML(t.title)}</p>
-              <div class="flex items-center flex-wrap gap-1.5 mt-1">
-                ${dateBadge}
-                ${repeatBadge}
-                ${reminderBadge}
-              </div>
-            </div>
-          </div>
-          <i class="fa-solid fa-chevron-right text-xs text-gray-300 opacity-0 group-hover:opacity-100 transition shrink-0"></i>
-        </div>
-      `;
-    }
-
     function renderDayView() {
-      const dateStr = getISODateString(currentDayDate);
-      const dayName = getDayOfWeekName(currentDayDate);
-      document.getElementById('day-view-title').textContent = `${currentDayDate.getFullYear()}年${currentDayDate.getMonth() + 1}月${currentDayDate.getDate()}日 ${dayName}`;
-
-      const holiday = HOLIDAYS_2026[dateStr];
+      const titleEl = document.getElementById('day-view-title');
       const holidayEl = document.getElementById('day-view-holiday');
-      holidayEl.textContent = holiday ? `${holiday.name} (${holiday.tag})` : '';
-
-      const dayTasks = tasks.filter(t => isTaskOnDate(t, dateStr));
       const container = document.getElementById('day-tasks-container');
 
-      if (dayTasks.length === 0) {
-        container.innerHTML = getEmptyStateHTML('当日暂无待办事项');
-        return;
+      const dateStr = getISODateString(currentDayDate);
+      const dayName = getDayOfWeekName(currentDayDate);
+
+      if (titleEl) {
+        const y = currentDayDate.getFullYear();
+        const m = currentDayDate.getMonth() + 1;
+        const d = currentDayDate.getDate();
+        titleEl.textContent = `${y}年${m}月${d}日 ${dayName}`;
       }
 
+      if (holidayEl) {
+        const h = HOLIDAYS_2026[dateStr];
+        holidayEl.textContent = h ? `${h.name} (${h.tag})` : '';
+      }
+
+      const dayTasks = tasks.filter(t => isTaskOnDate(t, dateStr));
+      
       dayTasks.sort((a, b) => {
-        if (!a.dueTime && b.dueTime) return -1;
-        if (a.dueTime && !b.dueTime) return 1;
-        return (a.dueTime || '').localeCompare(b.dueTime || '');
+        if (a.completed !== b.completed) return a.completed ? 1 : -1;
+        if (a.dueTime && !b.dueTime) return -1;
+        if (!a.dueTime && b.dueTime) return 1;
+        if (a.dueTime && b.dueTime) return a.dueTime.localeCompare(b.dueTime);
+        return b.priority - a.priority;
       });
 
-      container.innerHTML = dayTasks.map(t => renderTaskCardHTML(t)).join('');
+      if (container) {
+        container.innerHTML = dayTasks.length > 0 
+          ? dayTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('此日期暂无安排任务');
+      }
     }
 
-    function navigateDay(delta) {
-      currentDayDate.setDate(currentDayDate.getDate() + delta);
+    function navigateDay(offset) {
+      currentDayDate.setDate(currentDayDate.getDate() + offset);
       renderDayView();
     }
+
     function navigateDayToToday() {
       currentDayDate = new Date();
       renderDayView();
     }
 
     function renderWeekView() {
-      const startDate = new Date(currentWeekStartDate);
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 6);
-
-      document.getElementById('week-view-title').textContent = `${startDate.getMonth() + 1}月${startDate.getDate()}日 - ${endDate.getMonth() + 1}月${endDate.getDate()}日`;
-
+      const titleEl = document.getElementById('week-view-title');
       const grid = document.getElementById('week-grid');
-      grid.innerHTML = '';
+
+      const weekStart = new Date(currentWeekStartDate);
+      const weekEnd = new Date(currentWeekStartDate);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+
+      if (titleEl) {
+        const sm = weekStart.getMonth() + 1;
+        const sd = weekStart.getDate();
+        const em = weekEnd.getMonth() + 1;
+        const ed = weekEnd.getDate();
+        titleEl.textContent = `${weekStart.getFullYear()}年${sm}月${sd}日 - ${em}月${ed}日`;
+      }
+
+      if (!grid) return;
+
+      const todayStr = getISODateString(new Date());
+      let html = '';
 
       for (let i = 0; i < 7; i++) {
-        const d = new Date(startDate);
+        const d = new Date(weekStart);
         d.setDate(d.getDate() + i);
         const dateStr = getISODateString(d);
         const dayTasks = tasks.filter(t => isTaskOnDate(t, dateStr));
-        const isToday = dateStr === getISODateString(new Date());
-
-        const dayCol = document.createElement('div');
-        dayCol.className = `bg-white rounded-2xl p-2.5 shadow-sm border ${isToday ? 'border-brand/40 bg-brand/5' : 'border-gray-100'} flex flex-col min-h-[160px]`;
-
-        let taskItemsHTML = dayTasks.map(t => renderMicroCardHTML(t)).join('');
-        if (dayTasks.length === 0) {
-          taskItemsHTML = `<div class="text-[11px] text-gray-300 text-center py-4">无任务</div>`;
-        }
-
+        const isToday = (dateStr === todayStr);
         const holiday = HOLIDAYS_2026[dateStr];
-        const holidayTag = holiday ? `<span class="text-[9px] px-1 rounded bg-red-100 text-red-600 font-bold ml-1">${holiday.tag}</span>` : '';
 
-        dayCol.innerHTML = `
-          <div class="flex items-center justify-between border-b border-gray-100 pb-1.5 mb-2">
-            <div class="flex items-center">
-              <span class="text-xs font-bold ${isToday ? 'text-brand' : 'text-gray-700'}">${d.getDate()}日 (${getDayOfWeekShort(d)})</span>
-              ${holidayTag}
+        html += `
+          <div class="bg-white rounded-2xl p-3 shadow-sm border ${isToday ? 'border-brand ring-1 ring-brand/30' : 'border-gray-100'} flex flex-col min-h-[160px]">
+            <div class="flex items-center justify-between pb-2 border-b border-gray-100 mb-2">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-xs font-bold ${isToday ? 'text-brand' : 'text-gray-700'}">${d.getDate()}日 (${getDayOfWeekShort(d)})</span>
+                ${holiday ? `<span class="text-[9px] font-bold px-1 rounded ${holiday.type === 'rest' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}">${holiday.tag}</span>` : ''}
+              </div>
+              <span class="text-[10px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">${dayTasks.length}</span>
             </div>
-            <span class="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-gray-100 text-gray-600">${dayTasks.length}</span>
-          </div>
-          <div class="space-y-1.5 flex-1 overflow-y-auto">
-            ${taskItemsHTML}
+            <div class="space-y-1.5 flex-1 overflow-y-auto max-h-[220px]">
+              ${dayTasks.length > 0 
+                ? dayTasks.map(t => renderMicroCardHTML(t)).join('')
+                : '<div class="text-[10px] text-gray-300 text-center py-4">无任务</div>'}
+            </div>
           </div>
         `;
-
-        grid.appendChild(dayCol);
       }
+
+      grid.innerHTML = html;
     }
 
-    function navigateWeek(delta) {
-      currentWeekStartDate.setDate(currentWeekStartDate.getDate() + (delta * 7));
+    function navigateWeek(offset) {
+      currentWeekStartDate.setDate(currentWeekStartDate.getDate() + (offset * 7));
       renderWeekView();
     }
+
     function navigateWeekToToday() {
       currentWeekStartDate = getMonday(new Date());
       renderWeekView();
     }
 
-    function renderMicroCardHTML(t) {
-      const isHighPriority = t.priority === 3;
-      const borderStyle = isHighPriority ? 'border-l-2 border-l-red-500' : '';
-      const titleStyle = t.completed ? 'line-through text-gray-300' : 'text-gray-700';
-
-      return `
-        <div onclick="openModal('${t.id}')" class="p-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg text-xs cursor-pointer flex items-center justify-between group transition ${borderStyle}">
-          <div class="flex items-center space-x-1.5 min-w-0">
-            <button onclick="toggleTask('${t.id}', event)" class="text-xs text-gray-400 hover:text-brand shrink-0">
-              ${t.completed ? '<i class="fa-solid fa-circle-check text-brand"></i>' : '<i class="fa-regular fa-circle"></i>'}
-            </button>
-            <span class="truncate ${titleStyle}">${escapeHTML(t.title)}</span>
-          </div>
-        </div>
-      `;
-    }
-
     function renderMonthView() {
-      const year = currentMonthDate.getFullYear();
-      const month = currentMonthDate.getMonth();
-      document.getElementById('month-view-title').textContent = `${year}年 ${month + 1}月`;
-
+      const titleEl = document.getElementById('month-view-title');
       const grid = document.getElementById('month-grid');
-      grid.innerHTML = '';
 
-      const firstDayOfMonth = new Date(year, month, 1);
-      let startingDayOfWeek = firstDayOfMonth.getDay();
-      startingDayOfWeek = startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1;
+      const y = currentMonthDate.getFullYear();
+      const m = currentMonthDate.getMonth();
 
-      const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
-      const prevMonthLastDay = new Date(year, month, 0).getDate();
+      if (titleEl) {
+        titleEl.textContent = `${y}年 ${m + 1}月`;
+      }
+
+      if (!grid) return;
+
+      const firstDay = new Date(y, m, 1);
+      const lastDay = new Date(y, m + 1, 0);
+
+      let startDayOfWeek = firstDay.getDay();
+      startDayOfWeek = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+
       const todayStr = getISODateString(new Date());
+      let html = '';
 
-      if (!selectedMonthDate) selectedMonthDate = todayStr;
-
-      for (let i = startingDayOfWeek - 1; i >= 0; i--) {
-        const dayNum = prevMonthLastDay - i;
-        const cell = document.createElement('div');
-        cell.className = 'bg-gray-50/50 p-1 min-h-[58px] sm:min-h-[64px] flex flex-col items-center text-gray-300 text-xs select-none opacity-60';
-        cell.innerHTML = `<span class="mt-1 text-[11px] font-medium">${dayNum}</span>`;
-        grid.appendChild(cell);
+      for (let i = 0; i < startDayOfWeek; i++) {
+        html += `<div class="p-1 min-h-[50px] bg-gray-50/30"></div>`;
       }
 
-      for (let d = 1; d <= lastDayOfMonth; d++) {
-        const dateObj = new Date(year, month, d);
-        const dateStr = getISODateString(dateObj);
-        const isToday = dateStr === todayStr;
-        const isSelected = dateStr === selectedMonthDate;
-
-        const holiday = HOLIDAYS_2026[dateStr];
+      for (let day = 1; day <= lastDay.getDate(); day++) {
+        const d = new Date(y, m, day);
+        const dateStr = getISODateString(d);
         const dayTasks = tasks.filter(t => isTaskOnDate(t, dateStr));
-        const pendingTasks = dayTasks.filter(t => !t.completed);
-        const hasHighPriority = pendingTasks.some(t => t.priority === 3);
+        const isToday = (dateStr === todayStr);
+        const isSelected = (dateStr === selectedMonthDate);
+        const holiday = HOLIDAYS_2026[dateStr];
 
-        const cell = document.createElement('div');
-        cell.onclick = () => selectMonthDate(dateStr);
+        const hasHighPrio = dayTasks.some(t => !t.completed && t.priority === 3);
+        const pendingCount = dayTasks.filter(t => !t.completed).length;
 
-        let cellClasses = 'relative p-1 min-h-[58px] sm:min-h-[64px] flex flex-col items-center justify-between text-xs cursor-pointer select-none transition-all duration-150 active:bg-gray-100 ';
-        if (isSelected) cellClasses += 'bg-indigo-50/70 font-bold ';
-        else cellClasses += 'bg-white hover:bg-gray-50 ';
+        html += `
+          <div onclick="selectMonthDate('${dateStr}')" 
+            class="p-1 min-h-[52px] flex flex-col items-center justify-between cursor-pointer transition active:scale-95 border-b border-r border-gray-100 ${isSelected ? 'bg-indigo-50/70 font-bold' : 'hover:bg-gray-50'}">
+            
+            <div class="flex items-center space-x-1 w-full justify-between px-1">
+              <span class="text-xs ${isToday ? 'bg-brand text-white w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px]' : (isSelected ? 'text-brand font-bold' : 'text-gray-700')}">
+                ${day}
+              </span>
+              ${holiday ? `<span class="text-[9px] font-bold scale-75 origin-top-right ${holiday.type === 'rest' ? 'text-red-500' : 'text-amber-500'}">${holiday.tag}</span>` : ''}
+            </div>
 
-        cell.className = cellClasses;
+            <div class="flex items-center justify-center space-x-1 my-1">
+              ${hasHighPrio ? '<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>' : ''}
+              ${pendingCount > 0 ? `<span class="w-1.5 h-1.5 rounded-full ${hasHighPrio ? 'bg-brand' : 'bg-brand'}"></span>` : ''}
+              ${dayTasks.length > 0 && pendingCount === 0 ? '<span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>' : ''}
+            </div>
 
-        let dateNumBadge = '';
-        if (isSelected) {
-          dateNumBadge = `<span class="w-6 h-6 rounded-full bg-brand text-white flex items-center justify-center font-bold text-xs shadow-sm">${d}</span>`;
-        } else if (isToday) {
-          dateNumBadge = `<span class="w-6 h-6 rounded-full border-2 border-brand text-brand flex items-center justify-center font-bold text-xs">${d}</span>`;
-        } else {
-          dateNumBadge = `<span class="mt-0.5 text-xs text-gray-700 font-semibold">${d}</span>`;
-        }
-
-        let holidayTagHTML = '';
-        if (holiday && holiday.tag) {
-          const tagBg = holiday.type === 'rest' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700';
-          holidayTagHTML = `<span class="text-[8px] font-bold px-0.5 rounded leading-none ${tagBg}">${holiday.tag}</span>`;
-        }
-
-        let dotsHTML = '';
-        if (dayTasks.length > 0) {
-          if (dayTasks.length <= 3) {
-            dotsHTML = `<div class="flex items-center justify-center space-x-0.5 mb-1">`;
-            dayTasks.forEach(t => {
-              let dotColor = t.completed ? 'bg-gray-300' : (t.priority === 3 ? 'bg-red-500' : 'bg-brand');
-              dotsHTML += `<span class="w-1.5 h-1.5 rounded-full ${dotColor}"></span>`;
-            });
-            dotsHTML += `</div>`;
-          } else {
-            const pillBg = hasHighPriority ? 'bg-red-500 text-white' : 'bg-brand/10 text-brand font-bold';
-            dotsHTML = `<div class="mb-0.5"><span class="text-[9px] px-1 py-0.2 rounded-full ${pillBg}">${dayTasks.length}条</span></div>`;
-          }
-        } else {
-          dotsHTML = `<div class="h-2"></div>`;
-        }
-
-        cell.innerHTML = `
-          <div class="flex flex-col items-center justify-center w-full space-y-0.5">
-            ${dateNumBadge}
-            ${holidayTagHTML}
+            <div class="h-3">
+              ${dayTasks.length > 0 ? `<span class="text-[9px] text-gray-400 font-semibold">${dayTasks.length}条</span>` : ''}
+            </div>
           </div>
-          ${dotsHTML}
         `;
-
-        grid.appendChild(cell);
       }
 
-      const totalCells = startingDayOfWeek + lastDayOfMonth;
-      const trailingDays = (7 - (totalCells % 7)) % 7;
-      for (let i = 1; i <= trailingDays; i++) {
-        const cell = document.createElement('div');
-        cell.className = 'bg-gray-50/50 p-1 min-h-[58px] sm:min-h-[64px] flex flex-col items-center text-gray-300 text-xs select-none opacity-60';
-        cell.innerHTML = `<span class="mt-1 text-[11px] font-medium">${i}</span>`;
-        grid.appendChild(cell);
-      }
-
-      renderMonthSelectedDayTasks();
+      grid.innerHTML = html;
+      renderMonthSelectedDayAgenda();
     }
 
     function selectMonthDate(dateStr) {
@@ -987,57 +843,43 @@
       renderMonthView();
     }
 
-    function renderMonthSelectedDayTasks() {
-      if (!selectedMonthDate) return;
-      const d = new Date(selectedMonthDate + 'T00:00:00');
-      if (isNaN(d.getTime())) return;
-
+    function renderMonthSelectedDayAgenda() {
       const titleEl = document.getElementById('month-selected-date-title');
       const badgeEl = document.getElementById('month-selected-date-badge');
       const container = document.getElementById('month-selected-tasks-container');
 
-      titleEl.textContent = `${d.getMonth() + 1}月${d.getDate()}日 ${getDayOfWeekName(d)}`;
+      if (!selectedMonthDate) return;
+
+      const parts = selectedMonthDate.split('-');
+      const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      const dayName = getDayOfWeekName(d);
+
+      if (titleEl) {
+        titleEl.textContent = `${parseInt(parts[1])}月${parseInt(parts[2])}日 ${dayName}`;
+      }
 
       const holiday = HOLIDAYS_2026[selectedMonthDate];
-      if (holiday) {
-        badgeEl.classList.remove('hidden');
-        badgeEl.className = `text-[10px] font-bold px-2 py-0.5 rounded-full ${holiday.type === 'rest' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`;
-        badgeEl.textContent = holiday.name;
-      } else {
-        badgeEl.classList.add('hidden');
+      if (badgeEl) {
+        if (holiday) {
+          badgeEl.classList.remove('hidden');
+          badgeEl.textContent = `${holiday.name} (${holiday.tag})`;
+          badgeEl.className = `text-[10px] font-bold px-2 py-0.5 rounded-full ${holiday.type === 'rest' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`;
+        } else {
+          badgeEl.classList.add('hidden');
+        }
       }
 
       const dayTasks = tasks.filter(t => isTaskOnDate(t, selectedMonthDate));
 
-      if (dayTasks.length === 0) {
-        container.innerHTML = getEmptyStateHTML('当日无待办事项');
-        return;
-      }
-
-      dayTasks.sort((a, b) => {
-        if (a.completed !== b.completed) return a.completed ? 1 : -1;
-        return b.priority - a.priority;
-      });
-
-      container.innerHTML = dayTasks.map(t => renderTaskCardHTML(t)).join('');
-    }
-
-    function addQuickTaskForSelectedMonthDate() {
-      openModal();
-      if (selectedMonthDate) {
-        document.getElementById('edit-task-duedate').value = selectedMonthDate;
+      if (container) {
+        container.innerHTML = dayTasks.length > 0 
+          ? dayTasks.map(t => renderTaskCardHTML(t)).join('')
+          : getEmptyStateHTML('该选定日期无任务，点击右上角增加');
       }
     }
 
-    function navigateMonth(delta) {
-      currentMonthDate.setMonth(currentMonthDate.getMonth() + delta);
-      const todayStr = getISODateString(new Date());
-      if (currentMonthDate.getMonth() === new Date().getMonth() && currentMonthDate.getFullYear() === new Date().getFullYear()) {
-        selectedMonthDate = todayStr;
-      } else {
-        const firstDay = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1);
-        selectedMonthDate = getISODateString(firstDay);
-      }
+    function navigateMonth(offset) {
+      currentMonthDate.setMonth(currentMonthDate.getMonth() + offset);
       renderMonthView();
     }
 
@@ -1047,83 +889,134 @@
       renderMonthView();
     }
 
-    function toggleTask(id, event) {
-      if (event) event.stopPropagation();
+    function addQuickTaskForSelectedMonthDate() {
+      openModal(null);
+      const dateInput = document.getElementById('edit-task-duedate');
+      if (dateInput && selectedMonthDate) {
+        dateInput.value = selectedMonthDate;
+      }
+    }
 
+    function renderTaskCardHTML(t) {
+      const isHighPrio = (t.priority === 3);
+      const isCompleted = t.completed;
+      const repeatLabel = getRepeatLabel(t);
+
+      return `
+        <div class="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex items-center justify-between gap-3 transition hover:shadow-md">
+          <div class="flex items-center space-x-3 flex-1 min-w-0">
+            <button onclick="toggleTaskComplete('${t.id}', event)" class="shrink-0 text-lg text-gray-300 hover:text-brand transition active:scale-90">
+              <i class="${isCompleted ? 'fa-solid fa-circle-check text-brand' : 'fa-regular fa-circle'}"></i>
+            </button>
+            <div onclick="openModal('${t.id}')" class="flex-1 min-w-0 cursor-pointer">
+              <div class="flex items-center space-x-2">
+                ${isHighPrio ? '<span class="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>' : ''}
+                <h4 class="text-xs sm:text-sm font-semibold ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'} truncate">
+                  ${escapeHTML(t.title)}
+                </h4>
+              </div>
+              <div class="flex items-center space-x-2 text-[11px] text-gray-400 mt-0.5 flex-wrap gap-y-1">
+                ${t.dueDate ? `<span class="flex items-center"><i class="fa-regular fa-clock mr-1"></i>${t.dueDate} ${t.dueTime || ''}</span>` : '<span class="text-gray-400">无截止日期</span>'}
+                ${repeatLabel ? `<span class="bg-indigo-50 text-brand px-1.5 py-0.2 rounded text-[10px] font-bold"><i class="fa-solid fa-rotate mr-1"></i>${repeatLabel}</span>` : ''}
+                ${t.reminder ? '<i class="fa-solid fa-bell text-amber-500 text-[10px]" title="已设置提醒"></i>' : ''}
+              </div>
+            </div>
+          </div>
+          <button onclick="deleteTask('${t.id}', event)" class="p-1.5 text-gray-300 hover:text-red-500 rounded-lg transition shrink-0">
+            <i class="fa-regular fa-trash-can text-xs"></i>
+          </button>
+        </div>
+      `;
+    }
+
+    function renderMicroCardHTML(t) {
+      const isHighPrio = (t.priority === 3);
+      const isCompleted = t.completed;
+
+      return `
+        <div class="bg-gray-50/80 hover:bg-gray-100 rounded-xl p-2 transition text-xs flex items-center justify-between gap-1.5 border border-gray-100">
+          <button onclick="toggleTaskComplete('${t.id}', event)" class="shrink-0 text-xs text-gray-300 hover:text-brand transition">
+            <i class="${isCompleted ? 'fa-solid fa-circle-check text-brand' : 'fa-regular fa-circle'}"></i>
+          </button>
+          <div onclick="openModal('${t.id}')" class="flex-1 min-w-0 cursor-pointer">
+            <div class="flex items-center space-x-1">
+              ${isHighPrio ? '<span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>' : ''}
+              <span class="truncate font-medium text-[11px] ${isCompleted ? 'line-through text-gray-400' : 'text-gray-800'}">${escapeHTML(t.title)}</span>
+            </div>
+            ${t.dueTime ? `<div class="text-[9px] text-gray-400 mt-0.5">${t.dueTime}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function getEmptyStateHTML(msg) {
+      return `
+        <div class="bg-white/60 rounded-2xl p-4 text-center border border-dashed border-gray-200">
+          <p class="text-xs text-gray-400 font-medium">${msg}</p>
+        </div>
+      `;
+    }
+
+    function toggleTaskComplete(id, event) {
+      if (event) event.stopPropagation();
       const task = tasks.find(t => t.id === id);
       if (!task) return;
 
-      if (!task.completed && task.repeat && task.repeat !== 'none') {
-        advanceRepeatingTask(task);
+      if (!task.completed) {
+        if (task.repeat && task.repeat !== 'none') {
+          if (task.repeatEndType === 'count') {
+            task.repeatCount = (task.repeatCount || 1) - 1;
+            if (task.repeatCount <= 0) {
+              task.completed = true;
+              saveTasks();
+              return;
+            }
+          }
+          if (task.dueDate) {
+            task.dueDate = getNextRepeatDate(task.dueDate, task.repeat, task.repeatInterval || 1);
+          }
+          if (task.reminder) {
+            const remDateStr = task.reminder.split('T')[0];
+            const remTimeStr = task.reminder.split('T')[1] || '09:00';
+            const nextRemDate = getNextRepeatDate(remDateStr, task.repeat, task.repeatInterval || 1);
+            task.reminder = `${nextRemDate}T${remTimeStr}`;
+          }
+          task.completed = false;
+          task.reminded = false;
+        } else {
+          task.completed = true;
+        }
       } else {
-        task.completed = !task.completed;
+        task.completed = false;
       }
 
       saveTasks();
     }
 
-    function advanceRepeatingTask(task) {
-      if (task.repeatEndType === 'count') {
-        task.repeatCount = (task.repeatCount || 1) - 1;
-        if (task.repeatCount <= 0) {
-          task.completed = true;
-          task.repeat = 'none';
-          return;
-        }
-      }
-
-      const currentDue = task.dueDate ? new Date(task.dueDate + 'T00:00:00') : new Date();
-      let nextDue = new Date(currentDue);
-
-      if (task.repeat === 'daily') {
-        nextDue.setDate(nextDue.getDate() + 1);
-      } else if (task.repeat === 'weekly') {
-        nextDue.setDate(nextDue.getDate() + 7);
-      } else if (task.repeat === 'monthly') {
-        nextDue.setMonth(nextDue.getMonth() + 1);
-      } else if (task.repeat === 'weekday') {
-        do {
-          nextDue.setDate(nextDue.getDate() + 1);
-        } while (nextDue.getDay() === 0 || nextDue.getDay() === 6);
-      } else if (task.repeat === 'interval') {
-        const step = parseInt(task.repeatInterval) || 1;
-        nextDue.setDate(nextDue.getDate() + step);
-      }
-
-      const nextDateStr = getISODateString(nextDue);
-
-      if (task.reminder) {
-        const remDate = new Date(task.reminder);
-        if (!isNaN(remDate.getTime())) {
-          const diffMs = nextDue.getTime() - currentDue.getTime();
-          const nextRem = new Date(remDate.getTime() + diffMs);
-          task.reminder = nextRem.toISOString().slice(0, 16);
-        }
-      }
-
-      task.dueDate = nextDateStr;
-      task.completed = false;
-      task.reminded = false;
+    function deleteTask(id, event) {
+      if (event) event.stopPropagation();
+      tasks = tasks.filter(t => t.id !== id);
+      saveTasks();
     }
 
     function openModal(id = null) {
       const modal = document.getElementById('task-modal');
       const deleteBtn = document.getElementById('delete-task-btn');
-      const form = document.getElementById('task-form');
-
-      form.reset();
+      const titleInput = document.getElementById('edit-task-title');
+      const modalTitle = document.getElementById('modal-title');
 
       if (id) {
         const task = tasks.find(t => t.id === id);
         if (!task) return;
-        document.getElementById('modal-title').textContent = '编辑任务';
+
+        modalTitle.textContent = '编辑任务';
         document.getElementById('edit-task-id').value = task.id;
-        document.getElementById('edit-task-title').value = task.title;
+        titleInput.value = task.title;
         document.getElementById('edit-task-duedate').value = task.dueDate || '';
         document.getElementById('edit-task-duetime').value = task.dueTime || '';
-        document.getElementById('edit-task-priority').checked = task.priority === 3;
+        document.getElementById('edit-task-priority').checked = (task.priority === 3);
         document.getElementById('edit-task-repeat').value = task.repeat || 'none';
-        document.getElementById('edit-task-interval').value = task.repeatInterval || 1;
+        document.getElementById('edit-task-interval').value = task.repeatInterval || 2;
         document.getElementById('edit-task-repeat-endtype').value = task.repeatEndType || 'infinite';
         document.getElementById('edit-task-repeat-count').value = task.repeatCount || 5;
         document.getElementById('edit-task-reminder').value = task.reminder || '';
@@ -1131,15 +1024,17 @@
 
         deleteBtn.classList.remove('hidden');
       } else {
-        document.getElementById('modal-title').textContent = '新建任务';
+        modalTitle.textContent = '新建任务';
+        document.getElementById('task-form').reset();
         document.getElementById('edit-task-id').value = '';
         document.getElementById('edit-task-duedate').value = getISODateString(new Date());
-        document.getElementById('edit-task-ringtone').value = 'chime';
         deleteBtn.classList.add('hidden');
       }
 
       handleRepeatTypeChange();
+      handleRepeatEndTypeChange();
       modal.classList.remove('hidden');
+      setTimeout(() => titleInput.focus(), 100);
     }
 
     function closeModal() {
@@ -1155,209 +1050,82 @@
       const intervalBox = document.getElementById('repeat-interval-container');
       const endBox = document.getElementById('repeat-end-container');
 
-      if (val === 'none') {
-        intervalBox.classList.add('hidden');
-        endBox.classList.add('hidden');
-      } else {
-        endBox.classList.remove('hidden');
-        if (val === 'interval') intervalBox.classList.remove('hidden');
-        else intervalBox.classList.add('hidden');
-      }
-      handleRepeatEndTypeChange();
+      if (val === 'interval') intervalBox.classList.remove('hidden');
+      else intervalBox.classList.add('hidden');
+
+      if (val !== 'none') endBox.classList.remove('hidden');
+      else endBox.classList.add('hidden');
     }
 
     function handleRepeatEndTypeChange() {
-      const val = document.getElementById('edit-task-repeat-endtype').value;
+      const endVal = document.getElementById('edit-task-repeat-endtype').value;
       const countBox = document.getElementById('repeat-count-container');
-      if (val === 'count') countBox.classList.remove('hidden');
-      else countBox.classList.add('hidden');
-    }
 
-    function deleteCurrentModalTask() {
-      const id = document.getElementById('edit-task-id').value;
-      if (!id) return;
-      tasks = tasks.filter(t => t.id !== id);
-      saveTasks();
-      closeModal();
+      if (endVal === 'count') countBox.classList.remove('hidden');
+      else countBox.classList.add('hidden');
     }
 
     function saveTask() {
       const id = document.getElementById('edit-task-id').value;
       const title = document.getElementById('edit-task-title').value.trim();
-      if (!title) return;
-
       const dueDate = document.getElementById('edit-task-duedate').value;
       const dueTime = document.getElementById('edit-task-duetime').value;
-      const priority = document.getElementById('edit-task-priority').checked ? 3 : 0;
+      const isHighPrio = document.getElementById('edit-task-priority').checked;
       const repeat = document.getElementById('edit-task-repeat').value;
-      const repeatInterval = parseInt(document.getElementById('edit-task-interval').value) || 1;
-      const repeatEndType = document.getElementById('edit-task-repeat-endtype').value;
-      const repeatCount = parseInt(document.getElementById('edit-task-repeat-count').value) || 1;
+      const interval = parseInt(document.getElementById('edit-task-interval').value) || 1;
+      const endType = document.getElementById('edit-task-repeat-endtype').value;
+      const count = parseInt(document.getElementById('edit-task-repeat-count').value) || 1;
       const reminder = document.getElementById('edit-task-reminder').value;
-      const ringtone = document.getElementById('edit-task-ringtone').value || 'chime';
+      const ringtone = document.getElementById('edit-task-ringtone').value;
 
-      if (reminder) {
-        autoRequestNotificationPermission();
-      }
-
-      const existingTask = id ? tasks.find(t => t.id === id) : null;
-      const taskData = {
-        id: id || ('task-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4)),
-        title,
-        dueDate,
-        dueTime,
-        priority,
-        repeat,
-        repeatInterval,
-        repeatEndType,
-        repeatCount,
-        reminder,
-        ringtone,
-        completed: existingTask ? existingTask.completed : false,
-        reminded: existingTask && existingTask.reminder === reminder ? existingTask.reminded : false
-      };
+      if (!title) return;
 
       if (id) {
-        const idx = tasks.findIndex(t => t.id === id);
-        if (idx !== -1) tasks[idx] = taskData;
+        const task = tasks.find(t => t.id === id);
+        if (task) {
+          task.title = title;
+          task.dueDate = dueDate;
+          task.dueTime = dueTime;
+          task.priority = isHighPrio ? 3 : 0;
+          task.repeat = repeat;
+          task.repeatInterval = interval;
+          task.repeatEndType = endType;
+          task.repeatCount = count;
+          task.reminder = reminder;
+          task.ringtone = ringtone;
+          task.reminded = false;
+        }
       } else {
-        tasks.unshift(taskData);
+        tasks.push({
+          id: 'task-' + Date.now(),
+          title: title,
+          dueDate: dueDate,
+          dueTime: dueTime,
+          priority: isHighPrio ? 3 : 0,
+          completed: false,
+          repeat: repeat,
+          repeatInterval: interval,
+          repeatEndType: endType,
+          repeatCount: count,
+          reminder: reminder,
+          reminded: false,
+          ringtone: ringtone
+        });
       }
 
       saveTasks();
       closeModal();
     }
 
-    function requestNotificationPermission() {
-      if ('Notification' in window) {
-        Notification.requestPermission().then(perm => {
-          if (perm === 'granted') {
-            alert('通知权限开通成功！到达提醒时间将显示系统推送。');
-          } else {
-            alert('未能开启通知权限，请在手机系统设置中为应用允许通知。');
-          }
-        });
+    function deleteCurrentModalTask() {
+      const id = document.getElementById('edit-task-id').value;
+      if (id) {
+        tasks = tasks.filter(t => t.id !== id);
+        saveTasks();
+        closeModal();
       }
     }
 
-    function checkReminders() {
-      const now = new Date();
-      let hasChanges = false;
-
-      tasks.forEach(t => {
-        if (!t.completed && t.reminder && !t.reminded) {
-          const remTime = new Date(t.reminder);
-          if (!isNaN(remTime.getTime()) && now >= remTime) {
-            triggerAlarm(t);
-            t.reminded = true;
-            hasChanges = true;
-          }
-        }
-      });
-
-      if (hasChanges) saveTasks();
-    }
-
-    function triggerAlarm(task) {
-      startLoopingSound(task.ringtone || 'chime');
-      showAlarmModal(task);
-
-      // Trigger System Level OS Notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const title = 'MyTodo 任务提醒';
-        const options = {
-          body: task.title + (task.dueDate ? ` (${task.dueDate})` : ''),
-          icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="%234772FA"><rect width="512" height="512" rx="100"/><path d="M381 181L214 348L131 265" stroke="white" stroke-width="48" stroke-linecap="round" fill="none"/></svg>',
-          requireInteraction: true
-        };
-
-        if (window.swRegistration && window.swRegistration.showNotification) {
-          window.swRegistration.showNotification(title, options);
-        } else {
-          new Notification(title, options);
-        }
-      }
-    }
-
-    function showAlarmModal(task) {
-      document.getElementById('alarm-popup-title').textContent = task.title;
-      document.getElementById('alarm-popup-time').textContent = `提醒设置时间：${task.reminder.replace('T', ' ')}`;
-      document.getElementById('alarm-popup-modal').classList.remove('hidden');
-    }
-
-    function dismissAlarmModal() {
-      stopLoopingSound();
-      document.getElementById('alarm-popup-modal').classList.add('hidden');
-    }
-
-    function startLoopingSound(style) {
-      stopLoopingSound();
-      playRingtoneOnce(style);
-      activeAlarmInterval = setInterval(() => {
-        playRingtoneOnce(style);
-      }, 1800);
-    }
-
-    function stopLoopingSound() {
-      if (activeAlarmInterval) {
-        clearInterval(activeAlarmInterval);
-        activeAlarmInterval = null;
-      }
-    }
-
-    function playRingtoneOnce(style) {
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
-
-        if (style === 'bell') {
-          // Classic Double Bell Tone
-          [600, 800].forEach((freq, idx) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.2);
-            gain.gain.setValueAtTime(0.7, ctx.currentTime + idx * 0.2);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.2 + 0.35);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + idx * 0.2);
-            osc.stop(ctx.currentTime + idx * 0.2 + 0.35);
-          });
-        } else if (style === 'alarm') {
-          // Rapid Alarm Beep
-          [880, 880, 880].forEach((freq, idx) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.15);
-            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.15);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.15 + 0.1);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + idx * 0.15);
-            osc.stop(ctx.currentTime + idx * 0.15 + 0.1);
-          });
-        } else {
-          // Chime Arpeggio
-          [523.25, 659.25, 783.99].forEach((freq, idx) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.12);
-            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.12);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.12 + 0.4);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + idx * 0.12);
-            osc.stop(ctx.currentTime + idx * 0.12 + 0.4);
-          });
-        }
-      } catch (e) {}
-    }
-
-    /* Web Speech Voice Recognition */
     function initSpeechRecognition() {
       const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!Speech) return;
@@ -1410,7 +1178,163 @@
       }
     }
 
-    /* Helper Utilities */
+    function autoRequestNotificationPermission() {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            syncRemindersToSW();
+          }
+        });
+      }
+    }
+
+    function syncRemindersToSW() {
+      if (!('serviceWorker' in navigator)) return;
+      const now = Date.now();
+      const pending = tasks
+        .filter(t => !t.completed && t.reminder && !t.reminded)
+        .map(t => ({
+          id: t.id,
+          title: t.title,
+          dueDate: t.dueDate,
+          reminder: t.reminder,
+          time: new Date(t.reminder).getTime()
+        }))
+        .filter(t => !isNaN(t.time) && t.time > now);
+
+      const sendMsg = (targetWorker) => {
+        if (targetWorker) {
+          targetWorker.postMessage({
+            type: 'SCHEDULE_REMINDERS',
+            reminders: pending
+          });
+        }
+      };
+
+      if (navigator.serviceWorker.controller) {
+        sendMsg(navigator.serviceWorker.controller);
+      }
+
+      navigator.serviceWorker.ready.then(reg => {
+        if (reg.active) {
+          sendMsg(reg.active);
+        }
+      }).catch(() => {});
+    }
+
+    function checkReminders() {
+      const now = new Date();
+      let hasChanges = false;
+
+      tasks.forEach(t => {
+        if (!t.completed && t.reminder && !t.reminded) {
+          const remTime = new Date(t.reminder);
+          if (!isNaN(remTime.getTime()) && now >= remTime) {
+            triggerAlarm(t);
+            t.reminded = true;
+            hasChanges = true;
+          }
+        }
+      });
+
+      if (hasChanges) saveTasks();
+    }
+
+    function triggerAlarm(task) {
+      startLoopingSound(task.ringtone || 'chime');
+      showAlarmModal(task);
+
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const title = 'MyTodo 任务提醒';
+        const options = {
+          body: task.title + (task.dueDate ? ` (${task.dueDate})` : ''),
+          icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="%234772FA"><rect width="512" height="512" rx="100"/><path d="M381 181L214 348L131 265" stroke="white" stroke-width="48" stroke-linecap="round" fill="none"/></svg>',
+          requireInteraction: true
+        };
+
+        if (window.swRegistration && window.swRegistration.showNotification) {
+          window.swRegistration.showNotification(title, options);
+        } else {
+          new Notification(title, options);
+        }
+      }
+    }
+
+    function showAlarmModal(task) {
+      document.getElementById('alarm-popup-title').textContent = task.title;
+      document.getElementById('alarm-popup-time').textContent = `提醒时间：${task.reminder.replace('T', ' ')}`;
+      document.getElementById('alarm-popup-modal').classList.remove('hidden');
+    }
+
+    function dismissAlarmModal() {
+      stopLoopingSound();
+      document.getElementById('alarm-popup-modal').classList.add('hidden');
+    }
+
+    function startLoopingSound(style) {
+      stopLoopingSound();
+      playRingtoneOnce(style);
+      activeAlarmInterval = setInterval(() => {
+        playRingtoneOnce(style);
+      }, 1800);
+    }
+
+    function stopLoopingSound() {
+      if (activeAlarmInterval) {
+        clearInterval(activeAlarmInterval);
+        activeAlarmInterval = null;
+      }
+    }
+
+    function playRingtoneOnce(style) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+
+        if (style === 'bell') {
+          [600, 800].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.2);
+            gain.gain.setValueAtTime(0.7, ctx.currentTime + idx * 0.2);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.2 + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.2);
+            osc.stop(ctx.currentTime + idx * 0.2 + 0.35);
+          });
+        } else if (style === 'alarm') {
+          [880, 880, 880].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.15);
+            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.15 + 0.1);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.15);
+            osc.stop(ctx.currentTime + idx * 0.15 + 0.1);
+          });
+        } else {
+          [523.25, 659.25, 783.99].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.12);
+            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.12);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.12 + 0.4);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.12);
+            osc.stop(ctx.currentTime + idx * 0.12 + 0.4);
+          });
+        }
+      } catch (e) {}
+    }
+
     function isTaskOnDate(task, dateStr) {
       if (task.dueDate === dateStr) return true;
       if (!task.repeat || task.repeat === 'none' || !task.dueDate) return false;
@@ -1432,6 +1356,31 @@
         return diffDays >= 0 && diffDays % step === 0;
       }
       return false;
+    }
+
+    function getNextRepeatDate(currentDateStr, repeatType, interval = 1) {
+      const d = new Date(currentDateStr + 'T00:00:00');
+      if (isNaN(d.getTime())) return currentDateStr;
+
+      if (repeatType === 'daily') {
+        d.setDate(d.getDate() + 1);
+      } else if (repeatType === 'weekly') {
+        d.setDate(d.getDate() + 7);
+      } else if (repeatType === 'monthly') {
+        const origDate = d.getDate();
+        d.setMonth(d.getMonth() + 1);
+        if (d.getDate() < origDate) {
+          d.setDate(0);
+        }
+      } else if (repeatType === 'weekday') {
+        do {
+          d.setDate(d.getDate() + 1);
+        } while (d.getDay() === 0 || d.getDay() === 6);
+      } else if (repeatType === 'interval') {
+        d.setDate(d.getDate() + interval);
+      }
+
+      return getISODateString(d);
     }
 
     function getRepeatLabel(t) {
