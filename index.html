@@ -33,7 +33,6 @@
   <!-- Font Awesome Icons CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-  <!-- Dynamic Inline PWA Manifest & Service Worker Script -->
   <script>
     (function setupPWA() {
       const manifest = {
@@ -60,25 +59,33 @@
       link.href = manifestURL;
       document.head.appendChild(link);
 
-      // Register Service Worker from Blob URL for offline support
+      // Register Service Worker from Blob URL for system level notifications & offline support
       if ('serviceWorker' in navigator) {
         const swCode = `
-          const CACHE_NAME = 'mytodo-v1';
+          const CACHE_NAME = 'mytodo-v2';
           self.addEventListener('install', (e) => self.skipWaiting());
           self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
           self.addEventListener('fetch', (e) => {
             e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
           });
+          self.addEventListener('notificationclick', (e) => {
+            e.notification.close();
+            e.waitUntil(clients.matchAll({ type: 'window' }).then((clientList) => {
+              if (clientList.length > 0) return clientList[0].focus();
+              return clients.openWindow && clients.openWindow('/');
+            }));
+          });
         `;
         const swBlob = new Blob([swCode], { type: 'application/javascript' });
         const swURL = URL.createObjectURL(swBlob);
-        navigator.serviceWorker.register(swURL).catch(() => {});
+        navigator.serviceWorker.register(swURL).then(reg => {
+          window.swRegistration = reg;
+        }).catch(() => {});
       }
     })();
   </script>
 
   <style>
-    /* Inter Font Fallbacks & Custom UI Animations */
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background-color: #F5F5F5;
@@ -99,19 +106,6 @@
       background: transparent;
     }
 
-    /* Pulse animation for voice recognition */
-    @keyframes pulse-ring {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-      70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-    }
-    .listening-pulse {
-      animation: pulse-ring 1.5s infinite;
-      background-color: #EF4444 !important;
-      color: white !important;
-    }
-
-    /* Smooth Fade transitions */
     .fade-in {
       animation: fadeIn 0.2s ease-in-out forwards;
     }
@@ -119,50 +113,44 @@
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
     }
+
+    /* Alarm Ringing Animation */
+    @keyframes ring-pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(71, 114, 250, 0.6); }
+      50% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(71, 114, 250, 0); }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(71, 114, 250, 0); }
+    }
+    .alarm-ring {
+      animation: ring-pulse 1s infinite;
+    }
   </style>
 </head>
-<body class="text-gray-800 antialiased min-h-screen flex flex-col pb-10">
+<body class="text-gray-800 antialiased min-h-screen flex flex-col pb-24">
 
   <header class="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm px-3 py-3 sm:px-6">
-    <div class="max-w-4xl mx-auto space-y-3">
+    <div class="max-w-4xl mx-auto flex items-center justify-between gap-2">
       
-      <!-- Logo & View Tabs -->
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center space-x-2 shrink-0">
-          <div class="w-8 h-8 rounded-xl bg-brand text-white flex items-center justify-center font-bold shadow-md">
-            <i class="fa-solid fa-check text-sm"></i>
-          </div>
-          <h1 class="text-lg font-bold text-gray-900 tracking-tight">MyTodo</h1>
+      <!-- App Brand Logo -->
+      <div class="flex items-center space-x-2 shrink-0">
+        <div class="w-8 h-8 rounded-xl bg-brand text-white flex items-center justify-center font-bold shadow-md">
+          <i class="fa-solid fa-check text-sm"></i>
         </div>
-
-        <!-- View Switcher Tabs -->
-        <div class="flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold text-gray-600">
-          <button onclick="switchView('list')" id="tab-list" class="view-tab px-2.5 py-1.5 rounded-lg transition-all">
-            <i class="fa-solid fa-list-ul sm:mr-1"></i><span class="hidden sm:inline">列表</span>
-          </button>
-          <button onclick="switchView('day')" id="tab-day" class="view-tab px-2.5 py-1.5 rounded-lg transition-all">
-            <i class="fa-regular fa-calendar-day sm:mr-1"></i><span class="hidden sm:inline">日视图</span>
-          </button>
-          <button onclick="switchView('week')" id="tab-week" class="view-tab px-2.5 py-1.5 rounded-lg transition-all">
-            <i class="fa-solid fa-calendar-week sm:mr-1"></i><span class="hidden sm:inline">周总览</span>
-          </button>
-          <button onclick="switchView('month')" id="tab-month" class="view-tab px-2.5 py-1.5 rounded-lg transition-all">
-            <i class="fa-solid fa-calendar-days sm:mr-1"></i><span class="hidden sm:inline">月总览</span>
-          </button>
-        </div>
+        <h1 class="text-lg font-bold text-gray-900 tracking-tight">MyTodo</h1>
       </div>
 
-      <!-- Quick Add Task Input & Voice Mic Button -->
-      <div class="relative flex items-center gap-2">
-        <div class="relative flex-1">
-          <input type="text" id="quick-input" placeholder="添加任务，按回车保存..." 
-            onkeydown="if(event.key==='Enter') quickAddTask()"
-            class="w-full pl-9 pr-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all shadow-inner">
-          <i class="fa-solid fa-plus absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-        </div>
-        <button id="mic-btn" onclick="toggleVoiceInput()" title="语音输入"
-          class="p-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl transition-all flex items-center justify-center shrink-0 active:scale-95">
-          <i class="fa-solid fa-microphone text-base"></i>
+      <!-- View Switcher Tabs with Clear Text Labels -->
+      <div class="flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold text-gray-600">
+        <button onclick="switchView('list')" id="tab-list" class="view-tab px-3 py-1.5 rounded-lg transition-all">
+          总览
+        </button>
+        <button onclick="switchView('day')" id="tab-day" class="view-tab px-3 py-1.5 rounded-lg transition-all">
+          日
+        </button>
+        <button onclick="switchView('week')" id="tab-week" class="view-tab px-3 py-1.5 rounded-lg transition-all">
+          周视图
+        </button>
+        <button onclick="switchView('month')" id="tab-month" class="view-tab px-3 py-1.5 rounded-lg transition-all">
+          月视图
         </button>
       </div>
 
@@ -171,9 +159,19 @@
 
   <main class="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-6">
 
-    <!-- VIEW 1: LIST VIEW -->
-    <section id="view-list" class="view-panel space-y-5 fade-in">
+    <!-- VIEW 1: OVERVIEW / LIST VIEW -->
+    <section id="view-list" class="view-panel space-y-4 fade-in">
       
+      <!-- Search Input Bar at the top of Overview Tab -->
+      <div class="relative flex items-center">
+        <input type="text" id="search-input" oninput="renderListView()" placeholder="搜索任务标题..." 
+          class="w-full pl-9 pr-8 py-2.5 text-xs sm:text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all shadow-sm">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+        <button onclick="clearSearch()" id="search-clear-btn" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+          <i class="fa-solid fa-xmark text-xs"></i>
+        </button>
+      </div>
+
       <!-- Overdue & Today Section -->
       <div class="space-y-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -194,7 +192,7 @@
 
       <!-- No Due Date Section -->
       <div class="space-y-2">
-        <div class="flex items-center space-x-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
+        <div class="flex items-center space-x-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
           <i class="fa-solid fa-inbox text-gray-400"></i>
           <span>无截止日期</span>
         </div>
@@ -215,7 +213,6 @@
 
     <!-- VIEW 2: DAY VIEW -->
     <section id="view-day" class="view-panel space-y-4 hidden fade-in">
-      <!-- Date Navigator Bar -->
       <div class="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex items-center justify-between">
         <button onclick="navigateDay(-1)" class="p-2 hover:bg-gray-100 rounded-xl transition text-gray-600 active:scale-95">
           <i class="fa-solid fa-chevron-left"></i>
@@ -232,13 +229,11 @@
         </div>
       </div>
 
-      <!-- Task Lists for Day View -->
       <div id="day-tasks-container" class="space-y-3"></div>
     </section>
 
     <!-- VIEW 3: WEEK OVERVIEW -->
     <section id="view-week" class="view-panel space-y-4 hidden fade-in">
-      <!-- Week Navigation -->
       <div class="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex items-center justify-between">
         <button onclick="navigateWeek(-1)" class="p-2 hover:bg-gray-100 rounded-xl transition text-gray-600 active:scale-95">
           <i class="fa-solid fa-chevron-left"></i>
@@ -252,17 +247,12 @@
         </div>
       </div>
 
-      <!-- Week 7-Columns Container -->
       <div id="week-grid" class="grid grid-cols-1 sm:grid-cols-7 gap-2"></div>
     </section>
 
     <!-- VIEW 4: MONTH OVERVIEW (TICKTICK MOBILE STYLE) -->
     <section id="view-month" class="view-panel space-y-4 hidden fade-in">
-      
-      <!-- Compact Month Calendar Container -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        
-        <!-- Navigation Bar -->
         <div class="flex items-center justify-between p-3 border-b border-gray-100">
           <button onclick="navigateMonth(-1)" class="p-2 hover:bg-gray-100 rounded-xl transition text-gray-600 active:scale-95">
             <i class="fa-solid fa-chevron-left"></i>
@@ -276,22 +266,14 @@
           </div>
         </div>
 
-        <!-- Weekday Labels Header -->
         <div class="grid grid-cols-7 border-b border-gray-100 bg-gray-50/70 text-center font-bold text-xs text-gray-500 py-2">
-          <div>一</div>
-          <div>二</div>
-          <div>三</div>
-          <div>四</div>
-          <div>五</div>
-          <div class="text-brand">六</div>
-          <div class="text-brand">日</div>
+          <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-brand">六</div><div class="text-brand">日</div>
         </div>
 
-        <!-- 7-Column Month Day Grid -->
         <div id="month-grid" class="grid grid-cols-7 divide-x divide-y divide-gray-100/80 bg-white"></div>
       </div>
 
-      <!-- Selected Day Task Agenda Panel (Below Month Grid) -->
+      <!-- Selected Day Agenda Panel -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-3">
         <div class="flex items-center justify-between pb-2 border-b border-gray-100">
           <div class="flex items-center space-x-2">
@@ -305,18 +287,20 @@
           </button>
         </div>
 
-        <!-- Selected Date Task Items -->
         <div id="month-selected-tasks-container" class="space-y-2 min-h-[80px]"></div>
       </div>
-
     </section>
 
   </main>
 
+  <button id="floating-add-btn" onclick="openModal()" title="新建任务" 
+    class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-brand text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-brand-hover active:scale-90 transition-all duration-200 border-4 border-white/80">
+    <i class="fa-solid fa-plus"></i>
+  </button>
+
   <div id="task-modal" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center hidden fade-in">
     <div class="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
       
-      <!-- Modal Header -->
       <div class="flex items-center justify-between border-b border-gray-100 pb-3">
         <h3 id="modal-title" class="text-base font-bold text-gray-800">编辑任务</h3>
         <button onclick="closeModal()" class="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition">
@@ -324,21 +308,29 @@
         </button>
       </div>
 
-      <!-- Modal Form Controls -->
       <form id="task-form" onsubmit="event.preventDefault(); saveTask();" class="space-y-3.5">
         <input type="hidden" id="edit-task-id">
 
-        <!-- Title Input -->
+        <!-- Title Input with Voice Button Integration -->
         <div>
           <label class="block text-xs font-bold text-gray-600 mb-1">任务名称</label>
-          <input type="text" id="edit-task-title" required placeholder="请输入任务标题..."
-            class="w-full px-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
+          <div class="relative flex items-center gap-2">
+            <input type="text" id="edit-task-title" required placeholder="请输入任务名称..."
+              class="w-full px-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand">
+            <button type="button" id="mic-btn" onclick="toggleVoiceInput()" title="语音输入"
+              class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl transition flex items-center justify-center shrink-0 active:scale-95">
+              <i class="fa-solid fa-microphone text-sm"></i>
+            </button>
+          </div>
         </div>
 
-        <!-- Due Date & Time (Optional Due Date) -->
+        <!-- Optional Due Date & Time -->
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="block text-xs font-bold text-gray-600 mb-1">截止日期 (可选)</label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-bold text-gray-600">截止日期 (可选)</label>
+              <button type="button" onclick="clearModalDate()" class="text-[10px] text-brand font-medium hover:underline">清除日期</button>
+            </div>
             <input type="date" id="edit-task-duedate" 
               class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
           </div>
@@ -380,7 +372,6 @@
             </div>
           </div>
 
-          <!-- Repeat End Conditions -->
           <div id="repeat-end-container" class="hidden grid grid-cols-2 gap-2 pt-1">
             <div>
               <label class="block text-xs font-bold text-gray-600 mb-1">重复结束条件</label>
@@ -398,15 +389,29 @@
           </div>
         </div>
 
-        <!-- Reminder Datetime -->
-        <div class="pt-1 border-t border-gray-100">
-          <label class="block text-xs font-bold text-gray-600 mb-1">提醒时间</label>
-          <input type="datetime-local" id="edit-task-reminder" 
-            class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
-          <p class="text-[10px] text-gray-400 mt-1">应用打开时，到达提醒时间将弹出通知并播放铃声。</p>
+        <!-- Reminder Setting & Ringtone Selection -->
+        <div class="space-y-2 pt-1 border-t border-gray-100">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-bold text-gray-600 mb-1">提醒时间</label>
+              <input type="datetime-local" id="edit-task-reminder" 
+                class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-600 mb-1">提示铃声</label>
+              <select id="edit-task-ringtone" class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand/30">
+                <option value="chime">清脆和弦 (默认)</option>
+                <option value="bell">经典响铃</option>
+                <option value="alarm">急促闹钟</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-gray-500 pt-1">
+            <span>支持系统级通知与强提醒弹窗</span>
+            <button type="button" onclick="requestNotificationPermission()" class="text-brand font-bold underline">开启通知权限</button>
+          </div>
         </div>
 
-        <!-- Modal Actions -->
         <div class="flex items-center justify-between pt-3 border-t border-gray-100">
           <button type="button" id="delete-task-btn" onclick="deleteCurrentModalTask()" class="px-3.5 py-2 text-xs font-bold text-red-500 hover:bg-red-50 rounded-xl transition hidden">
             <i class="fa-regular fa-trash-can mr-1"></i>删除任务
@@ -422,8 +427,25 @@
     </div>
   </div>
 
+  <div id="alarm-popup-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center hidden fade-in p-4">
+    <div class="bg-white w-full max-w-sm rounded-3xl p-6 text-center space-y-4 shadow-2xl border-2 border-brand/30 alarm-ring">
+      <div class="w-16 h-16 bg-brand/10 text-brand rounded-full flex items-center justify-center mx-auto text-2xl">
+        <i class="fa-solid fa-bell text-brand animate-bounce"></i>
+      </div>
+      <div>
+        <span class="text-xs font-bold text-brand uppercase tracking-wider">系统级任务提醒</span>
+        <h3 id="alarm-popup-title" class="text-lg font-bold text-gray-900 mt-1">任务名称</h3>
+        <p id="alarm-popup-time" class="text-xs text-gray-400 mt-1">提醒时间</p>
+      </div>
+      <div class="pt-2">
+        <button onclick="dismissAlarmModal()" class="w-full py-3 bg-brand text-white font-bold text-sm rounded-2xl shadow-lg hover:bg-brand-hover active:scale-95 transition">
+          关闭提醒并确认
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    /* Global Application State */
     let tasks = [];
     let currentView = 'list';
     let currentDayDate = new Date();
@@ -433,8 +455,8 @@
     let speechRecognition = null;
     let isListening = false;
     let isCompletedListOpen = false;
+    let activeAlarmInterval = null;
 
-    /* Chinese Statutory Holidays & Workdays Calendar Data */
     const HOLIDAYS_2026 = {
       '2026-01-01': { name: '元旦', type: 'rest', tag: '休' },
       '2026-02-16': { name: '除夕', type: 'rest', tag: '休' },
@@ -455,14 +477,12 @@
     window.addEventListener('DOMContentLoaded', () => {
       loadTasks();
       initSpeechRecognition();
-      renderCurrentView();
+      switchView('list');
 
-      // Start 30-second reminder check timer
-      setInterval(checkReminders, 30000);
-      checkReminders(); // Immediate check on startup
+      setInterval(checkReminders, 15000);
+      checkReminders();
     });
 
-    /* Data Storage Operations */
     function loadTasks() {
       try {
         const saved = localStorage.getItem('mytodo_tasks');
@@ -482,13 +502,14 @@
       return [
         {
           id: 'demo-1',
-          title: '欢迎使用 MyTodo！点击这里查看或编辑任务细节',
+          title: '欢迎使用 MyTodo！点击这里查看或编辑任务',
           dueDate: today,
           dueTime: '09:00',
           priority: 3,
           completed: false,
           repeat: 'none',
           reminder: '',
+          ringtone: 'chime',
           reminded: false
         },
         {
@@ -502,12 +523,12 @@
           repeatEndType: 'infinite',
           repeatCount: 0,
           reminder: '',
+          ringtone: 'bell',
           reminded: false
         }
       ];
     }
 
-    /* Navigation & View Switcher */
     function switchView(viewName) {
       currentView = viewName;
       document.querySelectorAll('.view-tab').forEach(btn => {
@@ -524,6 +545,16 @@
       const activePanel = document.getElementById(`view-${viewName}`);
       if (activePanel) activePanel.classList.remove('hidden');
 
+      // Toggle Floating Add Button Visibility
+      const fab = document.getElementById('floating-add-btn');
+      if (fab) {
+        if (viewName === 'month') {
+          fab.classList.add('hidden');
+        } else {
+          fab.classList.remove('hidden');
+        }
+      }
+
       renderCurrentView();
     }
 
@@ -535,6 +566,13 @@
     }
 
     function renderListView() {
+      const searchVal = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
+      const clearBtn = document.getElementById('search-clear-btn');
+      if (clearBtn) {
+        if (searchVal) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+
       const todayStr = getISODateString(new Date());
 
       const todayContainer = document.getElementById('list-today-container');
@@ -542,17 +580,18 @@
       const nodateContainer = document.getElementById('list-nodate-container');
       const completedContainer = document.getElementById('list-completed-container');
 
-      const activeTasks = tasks.filter(t => !t.completed);
-      const completedTasks = tasks.filter(t => t.completed);
+      let activeTasks = tasks.filter(t => !t.completed);
+      let completedTasks = tasks.filter(t => t.completed);
 
-      // Category 1: Today & Overdue
+      if (searchVal) {
+        activeTasks = activeTasks.filter(t => t.title.toLowerCase().includes(searchVal));
+        completedTasks = completedTasks.filter(t => t.title.toLowerCase().includes(searchVal));
+      }
+
       const todayOverdueTasks = activeTasks.filter(t => t.dueDate && t.dueDate <= todayStr);
-      // Category 2: Upcoming
       const upcomingTasks = activeTasks.filter(t => t.dueDate && t.dueDate > todayStr);
-      // Category 3: No due date
       const noDateTasks = activeTasks.filter(t => !t.dueDate);
 
-      // Sort by Priority and Time
       const sortFn = (a, b) => {
         if (b.priority !== a.priority) return b.priority - a.priority;
         return (a.dueTime || '23:59').localeCompare(b.dueTime || '23:59');
@@ -563,12 +602,20 @@
       noDateTasks.sort(sortFn);
       completedTasks.sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || ''));
 
-      todayContainer.innerHTML = todayOverdueTasks.length ? todayOverdueTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('太棒了，今天暂无待办');
+      todayContainer.innerHTML = todayOverdueTasks.length ? todayOverdueTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('暂无今日或过期待办');
       upcomingContainer.innerHTML = upcomingTasks.length ? upcomingTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('近期暂无安排');
       nodateContainer.innerHTML = noDateTasks.length ? noDateTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('暂无未定日期的任务');
       completedContainer.innerHTML = completedTasks.length ? completedTasks.map(t => renderTaskCardHTML(t)).join('') : getEmptyStateHTML('尚无完成记录');
 
       document.getElementById('completed-count-badge').textContent = completedTasks.length;
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('search-input');
+      if (input) {
+        input.value = '';
+        renderListView();
+      }
     }
 
     function toggleCompletedList() {
@@ -588,7 +635,6 @@
       return `<div class="p-3 text-center text-xs text-gray-400 bg-white/60 rounded-xl border border-dashed border-gray-200">${text}</div>`;
     }
 
-    /* Render Task Card Component */
     function renderTaskCardHTML(t) {
       const isHighPriority = t.priority === 3;
       const borderClass = isHighPriority ? 'border-l-4 border-l-red-500' : 'border-l-2 border-l-transparent';
@@ -624,7 +670,6 @@
       return `
         <div onclick="openModal('${t.id}')" class="group bg-white p-3 rounded-xl shadow-sm border border-gray-100/90 hover:shadow-md transition cursor-pointer flex items-center justify-between gap-3 ${borderClass}">
           <div class="flex items-center space-x-3 min-w-0">
-            <!-- Custom Checkbox Button -->
             <button onclick="toggleTask('${t.id}', event)" class="shrink-0 text-lg transition active:scale-90">
               ${t.completed 
                 ? '<i class="fa-solid fa-circle-check text-brand"></i>' 
@@ -661,7 +706,6 @@
         return;
       }
 
-      // Sort: All-day tasks first, then timed tasks early to late
       dayTasks.sort((a, b) => {
         if (!a.dueTime && b.dueTime) return -1;
         if (a.dueTime && !b.dueTime) return 1;
@@ -734,7 +778,6 @@
       renderWeekView();
     }
 
-    /* Render Small Micro Task Cards for Week & Month View */
     function renderMicroCardHTML(t) {
       const isHighPriority = t.priority === 3;
       const borderStyle = isHighPriority ? 'border-l-2 border-l-red-500' : '';
@@ -770,7 +813,6 @@
 
       if (!selectedMonthDate) selectedMonthDate = todayStr;
 
-      // Trailing days of previous month
       for (let i = startingDayOfWeek - 1; i >= 0; i--) {
         const dayNum = prevMonthLastDay - i;
         const cell = document.createElement('div');
@@ -779,7 +821,6 @@
         grid.appendChild(cell);
       }
 
-      // Days of current month
       for (let d = 1; d <= lastDayOfMonth; d++) {
         const dateObj = new Date(year, month, d);
         const dateStr = getISODateString(dateObj);
@@ -800,7 +841,6 @@
 
         cell.className = cellClasses;
 
-        // Date Number Badge
         let dateNumBadge = '';
         if (isSelected) {
           dateNumBadge = `<span class="w-6 h-6 rounded-full bg-brand text-white flex items-center justify-center font-bold text-xs shadow-sm">${d}</span>`;
@@ -810,14 +850,12 @@
           dateNumBadge = `<span class="mt-0.5 text-xs text-gray-700 font-semibold">${d}</span>`;
         }
 
-        // Holiday Tag
         let holidayTagHTML = '';
         if (holiday && holiday.tag) {
           const tagBg = holiday.type === 'rest' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700';
           holidayTagHTML = `<span class="text-[8px] font-bold px-0.5 rounded leading-none ${tagBg}">${holiday.tag}</span>`;
         }
 
-        // Dot indicators
         let dotsHTML = '';
         if (dayTasks.length > 0) {
           if (dayTasks.length <= 3) {
@@ -846,7 +884,6 @@
         grid.appendChild(cell);
       }
 
-      // Next month trailing days
       const totalCells = startingDayOfWeek + lastDayOfMonth;
       const trailingDays = (7 - (totalCells % 7)) % 7;
       for (let i = 1; i <= trailingDays; i++) {
@@ -924,31 +961,6 @@
       renderMonthView();
     }
 
-    function quickAddTask() {
-      const input = document.getElementById('quick-input');
-      const title = input.value.trim();
-      if (!title) return;
-
-      const newTask = {
-        id: 'task-' + Date.now(),
-        title: title,
-        dueDate: getISODateString(new Date()),
-        dueTime: '',
-        priority: 0,
-        completed: false,
-        repeat: 'none',
-        repeatInterval: 1,
-        repeatEndType: 'infinite',
-        repeatCount: 0,
-        reminder: '',
-        reminded: false
-      };
-
-      tasks.unshift(newTask);
-      saveTasks();
-      input.value = '';
-    }
-
     function toggleTask(id, event) {
       if (event) event.stopPropagation();
 
@@ -956,7 +968,6 @@
       if (!task) return;
 
       if (!task.completed && task.repeat && task.repeat !== 'none') {
-        // Advance repeating task to next period
         advanceRepeatingTask(task);
       } else {
         task.completed = !task.completed;
@@ -975,7 +986,6 @@
         }
       }
 
-      // Calculate next due date
       const currentDue = task.dueDate ? new Date(task.dueDate + 'T00:00:00') : new Date();
       let nextDue = new Date(currentDue);
 
@@ -996,7 +1006,6 @@
 
       const nextDateStr = getISODateString(nextDue);
 
-      // Advance reminder datetime if configured
       if (task.reminder) {
         const remDate = new Date(task.reminder);
         if (!isNaN(remDate.getTime())) {
@@ -1011,7 +1020,6 @@
       task.reminded = false;
     }
 
-    /* Modal Form Operations */
     function openModal(id = null) {
       const modal = document.getElementById('task-modal');
       const deleteBtn = document.getElementById('delete-task-btn');
@@ -1033,12 +1041,14 @@
         document.getElementById('edit-task-repeat-endtype').value = task.repeatEndType || 'infinite';
         document.getElementById('edit-task-repeat-count').value = task.repeatCount || 5;
         document.getElementById('edit-task-reminder').value = task.reminder || '';
+        document.getElementById('edit-task-ringtone').value = task.ringtone || 'chime';
 
         deleteBtn.classList.remove('hidden');
       } else {
         document.getElementById('modal-title').textContent = '新建任务';
         document.getElementById('edit-task-id').value = '';
         document.getElementById('edit-task-duedate').value = getISODateString(new Date());
+        document.getElementById('edit-task-ringtone').value = 'chime';
         deleteBtn.classList.add('hidden');
       }
 
@@ -1048,6 +1058,10 @@
 
     function closeModal() {
       document.getElementById('task-modal').classList.add('hidden');
+    }
+
+    function clearModalDate() {
+      document.getElementById('edit-task-duedate').value = '';
     }
 
     function handleRepeatTypeChange() {
@@ -1086,6 +1100,7 @@
       const repeatEndType = document.getElementById('edit-task-repeat-endtype').value;
       const repeatCount = parseInt(document.getElementById('edit-task-repeat-count').value) || 1;
       const reminder = document.getElementById('edit-task-reminder').value;
+      const ringtone = document.getElementById('edit-task-ringtone').value || 'chime';
 
       if (id) {
         const task = tasks.find(t => t.id === id);
@@ -1098,6 +1113,7 @@
           task.repeatInterval = repeatInterval;
           task.repeatEndType = repeatEndType;
           task.repeatCount = repeatCount;
+          task.ringtone = ringtone;
           if (task.reminder !== reminder) {
             task.reminder = reminder;
             task.reminded = false;
@@ -1108,7 +1124,7 @@
           id: 'task-' + Date.now(),
           title, dueDate, dueTime, priority,
           completed: false, repeat, repeatInterval,
-          repeatEndType, repeatCount, reminder,
+          repeatEndType, repeatCount, reminder, ringtone,
           reminded: false
         });
       }
@@ -1126,6 +1142,18 @@
       }
     }
 
+    function requestNotificationPermission() {
+      if ('Notification' in window) {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') {
+            alert('通知权限开通成功！到达提醒时间将显示系统推送。');
+          } else {
+            alert('未能开启通知权限，请在手机系统设置中为应用允许通知。');
+          }
+        });
+      }
+    }
+
     function checkReminders() {
       const now = new Date();
       let hasChanges = false;
@@ -1134,7 +1162,7 @@
         if (!t.completed && t.reminder && !t.reminded) {
           const remTime = new Date(t.reminder);
           if (!isNaN(remTime.getTime()) && now >= remTime) {
-            triggerNotification(t);
+            triggerAlarm(t);
             t.reminded = true;
             hasChanges = true;
           }
@@ -1144,45 +1172,106 @@
       if (hasChanges) saveTasks();
     }
 
-    function triggerNotification(task) {
-      playChimeSound();
+    function triggerAlarm(task) {
+      startLoopingSound(task.ringtone || 'chime');
+      showAlarmModal(task);
 
-      if ('Notification' in window) {
-        if (Notification.permission === 'granted') {
-          new Notification('MyTodo 任务提醒', {
-            body: task.title,
-            icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="%234772FA"><rect width="512" height="512" rx="100"/><path d="M381 181L214 348L131 265" stroke="white" stroke-width="48" stroke-linecap="round" fill="none"/></svg>'
-          });
-        } else if (Notification.permission !== 'denied') {
-          Notification.requestPermission().then(perm => {
-            if (perm === 'granted') triggerNotification(task);
-          });
+      // Trigger System Level OS Notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        const title = 'MyTodo 任务提醒';
+        const options = {
+          body: task.title + (task.dueDate ? ` (${task.dueDate})` : ''),
+          icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="%234772FA"><rect width="512" height="512" rx="100"/><path d="M381 181L214 348L131 265" stroke="white" stroke-width="48" stroke-linecap="round" fill="none"/></svg>',
+          requireInteraction: true
+        };
+
+        if (window.swRegistration && window.swRegistration.showNotification) {
+          window.swRegistration.showNotification(title, options);
+        } else {
+          new Notification(title, options);
         }
       }
     }
 
-    function playChimeSound() {
+    function showAlarmModal(task) {
+      document.getElementById('alarm-popup-title').textContent = task.title;
+      document.getElementById('alarm-popup-time').textContent = `提醒设置时间：${task.reminder.replace('T', ' ')}`;
+      document.getElementById('alarm-popup-modal').classList.remove('hidden');
+    }
+
+    function dismissAlarmModal() {
+      stopLoopingSound();
+      document.getElementById('alarm-popup-modal').classList.add('hidden');
+    }
+
+    function startLoopingSound(style) {
+      stopLoopingSound();
+      playRingtoneOnce(style);
+      activeAlarmInterval = setInterval(() => {
+        playRingtoneOnce(style);
+      }, 1800);
+    }
+
+    function stopLoopingSound() {
+      if (activeAlarmInterval) {
+        clearInterval(activeAlarmInterval);
+        activeAlarmInterval = null;
+      }
+    }
+
+    function playRingtoneOnce(style) {
       try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
 
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-        osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.3); // E5
-
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.start();
-        osc.stop(ctx.currentTime + 0.5);
+        if (style === 'bell') {
+          // Classic Double Bell Tone
+          [600, 800].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.2);
+            gain.gain.setValueAtTime(0.7, ctx.currentTime + idx * 0.2);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.2 + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.2);
+            osc.stop(ctx.currentTime + idx * 0.2 + 0.35);
+          });
+        } else if (style === 'alarm') {
+          // Rapid Alarm Beep
+          [880, 880, 880].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.15);
+            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.15 + 0.1);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.15);
+            osc.stop(ctx.currentTime + idx * 0.15 + 0.1);
+          });
+        } else {
+          // Chime Arpeggio
+          [523.25, 659.25, 783.99].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.12);
+            gain.gain.setValueAtTime(0.6, ctx.currentTime + idx * 0.12);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.12 + 0.4);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + idx * 0.12);
+            osc.stop(ctx.currentTime + idx * 0.12 + 0.4);
+          });
+        }
       } catch (e) {}
     }
 
-    /* Web Speech Voice Input */
+    /* Web Speech Voice Recognition */
     function initSpeechRecognition() {
       const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!Speech) return;
@@ -1194,7 +1283,7 @@
       speechRecognition.onresult = (e) => {
         const text = e.results[0][0].transcript;
         if (text) {
-          const input = document.getElementById('quick-input');
+          const input = document.getElementById('edit-task-title');
           input.value = text;
           input.focus();
         }
@@ -1229,8 +1318,10 @@
 
     function updateMicUI() {
       const btn = document.getElementById('mic-btn');
-      if (isListening) btn.classList.add('listening-pulse');
-      else btn.classList.remove('listening-pulse');
+      if (btn) {
+        if (isListening) btn.classList.add('bg-red-500', 'text-white');
+        else btn.classList.remove('bg-red-500', 'text-white');
+      }
     }
 
     /* Helper Utilities */
