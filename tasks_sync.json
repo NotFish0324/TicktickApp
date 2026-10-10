@@ -1,1 +1,62 @@
-[]
+[
+  {
+    "id": "task-1791528700048",
+    "title": "木板上油",
+    "dueDate": "2026-10-11",
+    "dueTime": "20:36",
+    "priority": 0,
+    "repeat": "none",
+    "repeatInterval": 2,
+    "repeatEndType": "infinite",
+    "repeatCount": 5,
+    "reminder": "2026-10-10T10:04",
+    "ringtone": "bell",
+    "completed": false,
+    "reminded": false
+  },
+  {
+    "id": "task-1791526074804",
+    "title": "砍树",
+    "dueDate": "2026-10-09",
+    "dueTime": "",
+    "priority": 0,
+    "completed": false,
+    "repeat": "none",
+    "repeatInterval": 1,
+    "repeatEndType": "infinite",
+    "repeatCount": 5,
+    "reminder": "2026-10-10T10:12",
+    "reminded": false,
+    "ringtone": "chime"
+  },
+  {
+    "id": "task-1791525998488",
+    "title": "整理手机存储，照片传电脑",
+    "dueDate": "2026-10-10",
+    "dueTime": "",
+    "priority": 3,
+    "completed": false,
+    "repeat": "none",
+    "repeatInterval": 1,
+    "repeatEndType": "infinite",
+    "repeatCount": 5,
+    "reminder": "2026-10-10T10:10",
+    "reminded": false,
+    "ringtone": "chime"
+  },
+  {
+    "id": "task_1791513824623",
+    "title": "脱毛",
+    "dueDate": "2026-10-11",
+    "dueTime": "",
+    "priority": 3,
+    "completed": false,
+    "repeat": "interval",
+    "repeatInterval": 40,
+    "repeatEndMode": "never",
+    "repeatCount": 8,
+    "reminder": "",
+    "reminded": false,
+    "repeatEndType": "count"
+  }
+]
