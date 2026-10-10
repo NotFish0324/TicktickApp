@@ -1,0 +1,35 @@
+name: Sync Tasks to Calendar ICS
+
+on:
+  push:
+    paths:
+      - 'tasks_sync.json'
+  schedule:
+    # 北京时间 08:00 - 22:00 对应 UTC 00:00 - 14:00，每 15 分钟运行一次
+    - cron: '*/15 0-14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Generate ICS file
+        run: python generate_ics.py
+
+      - name: Commit and push if changed
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.node.red-app'
+          git add calendar.ics
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update calendar.ics [skip ci]" && git push)
